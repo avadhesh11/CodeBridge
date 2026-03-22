@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Socket Test</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+
+<h1>Socket Test</h1>
+<input id="token" type="text">
+<button onclick="run()">submit</button>
+<textarea id="editor" rows="10" cols="50"></textarea>
+<script>
+const run=()=>{
+  const socket = io("http://localhost:5000",{
+     auth: {
+      token: document.getElementById("token").value
+    }
+  });
+
+  socket.on("connect", () => {
+    console.log("Connected:", socket.id);
+    socket.emit("join-room", {
+  roomID: "Jl1EOXTu",
+});
+  });
+
+  socket.on("joined-successfully", (data) => {
+    console.log("Joined:", data);
+  });
+ 
+  
+  const editor = document.getElementById("editor");
+
+  editor.addEventListener("input", () => {
+    socket.emit("code-change", {
+      code: editor.value
+    });
+  });
+
+  socket.on("code-update", (data) => {
+    editor.value = data.code;
+  });
+
+  socket.on("error-message", (msg) => {
+    console.log("Error:", msg);
+  });
+}
+</script>
+
+</body>
+</html>
