@@ -17,22 +17,22 @@ const app = express();
 
 app.use(
   cors({
-    origin:["https://localhost:5173",
-    "https://10.196.193.152:5173"],
+    origin:[process.env.FRONTEND_URL],
+    
     credentials: true
   })
 );
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: "secret",
-  resave: false,
-  saveUninitialized: false
-}));
+// app.use(session({
+//   secret: "secret",
+//   resave: false,
+//   saveUninitialized: false
+// }));
 
-app.use(passport.initialize());
-app.use(passport.session());
+// app.use(passport.initialize());
+// app.use(passport.session());
 const mongo = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);

@@ -6,12 +6,13 @@ export default function initSocket(server){
     
 const io=new Server(server,{
     cors: {
-    origin: ["https://localhost:5173","https://10.196.193.152:5173"],
+    origin: ["http://localhost:5173"],
     methods: ["GET", "POST"],
     credentials: true
   },
   transports: ["websocket", "polling"]
 });
+
 io.use((socket, next) => {
   try {
 
