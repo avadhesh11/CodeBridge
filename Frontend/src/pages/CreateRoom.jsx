@@ -430,13 +430,13 @@ const handleCreate = async () => {
           </div>
 
           {/* SESSION SETTINGS */}
-          <div className="form-card">
+          {/* <div className="form-card">
             <div className="form-card-header">
               <span className="fch-icon">⚙️</span>
               <span className="fch-title">Session Settings</span>
             </div>
-            <div className="form-card-body">
-              {/* <div className="field">
+            <div className="form-card-body"> 
+               <div className="field">
                 <div className="field-label">Duration</div>
                 <div className="dur-opts">
                   {DURATIONS.map(d => (
@@ -447,8 +447,8 @@ const handleCreate = async () => {
                     >{d}</div>
                   ))}
                 </div>
-              </div> */}
-              <div className="field">
+              </div> 
+               <div className="field">
                 <div className="field-label">Features</div>
                 <div className="tiles">
                   {features.map(f => (
@@ -463,9 +463,9 @@ const handleCreate = async () => {
                     </div>
                   ))}
                 </div>
-              </div>
+              </div> 
             </div>
-          </div>
+          </div>*/}
 
         </div>
 
@@ -528,7 +528,7 @@ const handleCreate = async () => {
               <button
                 className="create-btn"
                 onClick={handleCreate}
-                disabled={ !form.selectedQuestion}
+                // disabled={ !form.selectedQuestion}
               >
                 <span>⚡</span> Launch Room
               </button>

@@ -386,7 +386,52 @@ fetchQuestion();
     if (selected === id || selected === "new") { setSelected(null); }
     setDeleteTarget(null);
   };
+const handleFileUpload = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 100 * 1024) {
+  alert("File too large!");
+  return;
+}
+  const reader = new FileReader();
 
+  reader.onload = (event) => {
+    try {
+      const text = event.target.result;
+      const data = JSON.parse(text);
+
+      // validation
+      if (!data.sample && !data.hidden) {
+        alert("Invalid format! Must contain 'sample' or 'hidden'");
+        return;
+      }
+
+      const sample = (data.sample || []).map(tc => ({
+        input: tc.input?.trim() || "",
+        output: tc.output?.trim() || "",
+      }));
+
+      const hidden = (data.hidden || []).map(tc => ({
+        input: tc.input?.trim() || "",
+        output: tc.output?.trim() || "",
+      }));
+
+      setForm(prev => ({
+        ...prev,
+      sampletcs: [...prev.sampletcs, ...sample],
+hiddentcs: [...prev.hiddentcs, ...hidden],
+      }));
+
+      showToast(); // reuse your toast
+      alert(`Imported ${sample.length + hidden.length} testcases`);
+    } catch (err) {
+      console.error(err);
+      alert("Invalid JSON file!");
+    }
+  };
+
+  reader.readAsText(file);
+};
   const updateField = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
   const updateTC = (type, idx, field, val) => {
@@ -555,7 +600,44 @@ fetchQuestion();
                     <span style={{ color: "var(--cyan)" }}>◆ Sample</span> — visible to candidate &nbsp;&nbsp;
                     <span style={{ color: "var(--amber)" }}>◆ Hidden</span> — used for final verdict
                   </div>
+                <div style={{ marginBottom: 16 }}>
+  <div className="field-label">Upload Test Cases (JSON)</div>
 
+  <input
+    type="file"
+    accept=".json"
+    onChange={handleFileUpload}
+    className="field-input"
+    style={{ padding: "6px" }}
+  />
+
+  <div style={{
+    fontSize: "0.7rem",
+    marginTop: 8,
+    color: "var(--text-muted)",
+    fontFamily: "'JetBrains Mono', monospace",
+    lineHeight: 1.6
+  }}>
+   Json Format:
+    <pre style={{
+      background: "var(--surface2)",
+      padding: "8px",
+      borderRadius: "6px",
+      marginTop: "6px",
+      overflow: "auto"
+    }}>
+{`{
+  "sample": [
+    { "input": "2 3 {// if double line input then use }\\n 9 like this", "output": "5" }
+  ],
+  "hidden": [
+    { "input": "10 20", "output": "30" }
+  ]
+}`}
+    </pre>
+  </div>
+</div>
+               OR  
                   <div className="tc-grid">
                     {allTCs.map(({ tc, type, i, label }) => (
                       <div className="tc-card" key={`${type}-${i}`}>
@@ -570,7 +652,7 @@ fetchQuestion();
                             <div className="tc-field-label">Input</div>
                             <textarea
                               className="tc-field-input"
-                              placeholder={"nums = [2,7,11,15]\ntarget = 9"}
+                              placeholder={"2 7 11 15 \n9"}
                               value={tc.input}
                               onChange={e => updateTC(type, i, "input", e.target.value)}
                             />

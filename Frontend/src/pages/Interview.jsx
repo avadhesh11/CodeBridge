@@ -216,10 +216,22 @@ export default function InterviewPage() {
     socket.emit("screen-share-stop");
   };
 
-  useEffect(() => {
-    const saved = localStorage.getItem("code");
-    if (saved) { setCode(saved); localStorage.removeItem("code"); }
-  }, []);
+useEffect(() => {
+ if (!questions || !code) return;
+
+  const timeout = setTimeout(() => {
+    localStorage.setItem(questions._id, code);
+  }, 300);
+
+  return () => clearTimeout(timeout);
+}, [code, questions]); 
+useEffect(() => {
+  if (questions) {
+    const saved = localStorage.getItem(questions._id);
+    if (saved) setCode(saved);
+    else setCode(defaultCode);
+  }
+}, [questions]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -342,8 +354,18 @@ export default function InterviewPage() {
 
     socket.on("screen-share-start", () => setScreenShared(true));
     socket.on("screen-share-stop", () => setScreenShared(false));
-    socket.on("code-update", ({ code }) => setCode(code));
-    socket.on("question-selected", ({ question }) => setQuestions(question));
+    socket.on("code-update", ({ code }) => {
+      setCode(code)
+      if (questions) {
+    localStorage.setItem(questions._id, code); 
+  }
+  });
+    socket.on("question-selected", ({ question }) => {
+  setQuestions(question);
+ 
+    });
+    
+    
 
     return () => {
       ["joined-successfully", "error-message", "code-update", "question-selected",
@@ -534,6 +556,7 @@ export default function InterviewPage() {
                 onChange={(v) => {
                   if (role === "interviewer") return;
                   setCode(v);
+        
                   socket.emit("code-change", { code: v });
                 }}
                 options={{

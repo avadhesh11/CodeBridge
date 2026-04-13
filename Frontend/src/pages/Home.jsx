@@ -191,6 +191,15 @@ const handleJoinRoom = () => {
               scrollref.current?.scrollIntoView({behaviour:"smooth", block: 'start'})
             }}>Features</button>
             {user && (
+              <>
+                <button
+      className="btn-secondary"
+      style={{padding:"8px 16px"}}
+      onClick={() => navigate("/create")}
+    >
+      Create Room
+    </button>
+
     <button
       className="btn-secondary"
       style={{padding:"8px 16px"}}
@@ -198,6 +207,7 @@ const handleJoinRoom = () => {
     >
       Join Room
     </button>
+    </>
   )}
             {!user ? ( <a href="/login" className="nav-cta">Get Started →</a>):
             (

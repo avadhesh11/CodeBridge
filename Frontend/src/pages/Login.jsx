@@ -176,8 +176,7 @@ try {
             </h2>
             <p className="auth-left-sub">
               Real-time collaborative coding sessions,<br />
-              Docker-powered C++ execution,<br />
-              peer-to-peer video — all in one place.
+             
             </p>
           </div>
 
@@ -189,8 +188,8 @@ try {
             </div>
             <div className="auth-term-body">
               <div><span className="tc">$ </span><span className="tg">codebridge</span> <span className="ty">--connect</span></div>
-              <div><span className="tc">✓ Docker engine ready</span></div>
-              <div><span className="tc">✓ Socket.io server online</span></div>
+              <div><span className="tc">✓ Engine ready</span></div>
+              <div><span className="tc">✓ server online</span></div>
               <div><span className="tc">✓ WebRTC peers available</span></div>
               <div><span className="tcyan">◉ Session #4f2a started</span></div>
               <div><span className="tc">Waiting for candidate...</span><span className="tg" style={{animation:"pulse 1s infinite"}}>█</span></div>
