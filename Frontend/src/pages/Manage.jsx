@@ -322,11 +322,14 @@ export default function QuestionManager() {
 const fetchQuestion=async()=>{
 try {
   const res=await api("get",`question/private/${roomID}`);
-  setQuestions(res.data.questions);
+  const public_ques=await api("get",`question/public/${roomID}`);
+  const allQuestions = [...(public_ques.data.questions || []), ...(res.data.questions || [])];
+  setQuestions(allQuestions);
 } catch (error) {
   console.error("error fetching questions:",error);
 }
   };
+
 const handleSaveQuestion=async()=>{
 try {
   const res=await api("post",`question/add/${roomID}`,{
@@ -505,7 +508,10 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                   <span>📋 {q.sampletcs.length} sample</span>
                   <span>🔒 {q.hiddentcs.length} hidden</span>
                 </div>
-                <button className="q-item-del" onClick={e => { e.stopPropagation(); setDeleteTarget(q); }}>✕ del</button>
+                {q.qtype !== "public" && (
+                  <button className="q-item-del" onClick={e => { e.stopPropagation(); setDeleteTarget(q); }}>✕ del</button>
+                )}
+
               </div>
             ))}
           </div>
@@ -539,7 +545,13 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                   {selected === "new" ? "New Question" : form.title || "Untitled Question"}
                 </div>
                 <button className="discard-btn" onClick={() => setSelected(null)}>✕ Discard</button>
-                <button className="save-btn" onClick={saveQuestion}>↓ Save Question</button>
+                {form.qtype === "public" ? (
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontStyle: "italic", alignSelf: "center", marginRight: 12 }}>
+                    Public Question (Read-only)
+                  </span>
+                ) : (
+                  <button className="save-btn" onClick={handleSaveQuestion}>↓ Save Question</button>
+                )}
               </div>
 
               <div className="editor-body">
@@ -550,20 +562,21 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                   <div className="form-row form-row-3" style={{ marginBottom: 16 }}>
                     <div className="field">
                       <div className="field-label">Title</div>
-                      <input className="field-input" placeholder="e.g. Two Sum" value={form.title} onChange={e => updateField("title", e.target.value)} />
+                      <input className="field-input" placeholder="e.g. Two Sum" value={form.title} onChange={e => updateField("title", e.target.value)} disabled={form.qtype === "public"} />
                     </div>
                     <div className="field">
                       <div className="field-label">Time Limit (sec)</div>
-                      <input className="field-input" type="number" min={1} max={10} value={form.timelimit} onChange={e => updateField("timelimit", Number(e.target.value))} />
+                      <input className="field-input" type="number" min={1} max={10} value={form.timelimit} onChange={e => updateField("timelimit", Number(e.target.value))} disabled={form.qtype === "public"} />
                     </div>
                     <div className="field">
                       <div className="field-label">Difficulty</div>
                       <div className="diff-radio">
-                        {["easy", "medium", "hard"].map(d => (
+                        {["Easy", "Medium", "Hard"].map(d => (
                           <div
                             key={d}
                             className={`diff-opt ${diffClass[d]} ${form.tag === d ? "sel" : ""}`}
-                            onClick={() => updateField("tag", d)}
+                            onClick={() => form.qtype !== "public" && updateField("tag", d)}
+                            style={form.qtype === "public" ? { cursor: "not-allowed", opacity: 0.6 } : {}}
                           >{d}</div>
                         ))}
                       </div>
@@ -577,6 +590,7 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                       placeholder="Describe the problem clearly. Include what the function should take as input and what it should return."
                       value={form.description}
                       onChange={e => updateField("description", e.target.value)}
+                      disabled={form.qtype === "public"}
                     />
                   </div>
 
@@ -588,9 +602,11 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                       placeholder={"1 ≤ nums.length ≤ 10⁴\n-10⁹ ≤ nums[i] ≤ 10⁹"}
                       value={form.constraints}
                       onChange={e => updateField("constraints", e.target.value)}
+                      disabled={form.qtype === "public"}
                     />
                   </div>
                 </div>
+
 
                 {/* ── TEST CASES ── */}
                 <div className="form-section">
@@ -600,77 +616,84 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                     <span style={{ color: "var(--cyan)" }}>◆ Sample</span> — visible to candidate &nbsp;&nbsp;
                     <span style={{ color: "var(--amber)" }}>◆ Hidden</span> — used for final verdict
                   </div>
-                <div style={{ marginBottom: 16 }}>
-  <div className="field-label">Upload Test Cases (JSON)</div>
+                {form.qtype !== "public" && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="field-label">Upload Test Cases (JSON)</div>
 
-  <input
-    type="file"
-    accept=".json"
-    onChange={handleFileUpload}
-    className="field-input"
-    style={{ padding: "6px" }}
-  />
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleFileUpload}
+                      className="field-input"
+                      style={{ padding: "6px" }}
+                    />
 
-  <div style={{
-    fontSize: "0.7rem",
-    marginTop: 8,
-    color: "var(--text-muted)",
-    fontFamily: "'JetBrains Mono', monospace",
-    lineHeight: 1.6
-  }}>
-   Json Format:
-    <pre style={{
-      background: "var(--surface2)",
-      padding: "8px",
-      borderRadius: "6px",
-      marginTop: "6px",
-      overflow: "auto"
-    }}>
-{`{
-  "sample": [
-    { "input": "2 3 {// if double line input then use }\\n 9 like this", "output": "5" }
-  ],
-  "hidden": [
-    { "input": "10 20", "output": "30" }
-  ]
-}`}
-    </pre>
-  </div>
-</div>
-               OR  
-                  <div className="tc-grid">
-                    {allTCs.map(({ tc, type, i, label }) => (
-                      <div className="tc-card" key={`${type}-${i}`}>
-                        <div className="tc-card-header">
-                          <span className="tc-num">Case #{i + 1}</span>
-                          <span className={`tc-type-badge ${label === "Sample" ? "tb-sample" : "tb-hidden"}`}>{label}</span>
-                          <span className="tc-spacer" />
+                    <div style={{
+                      fontSize: "0.7rem",
+                      marginTop: 8,
+                      color: "var(--text-muted)",
+                      fontFamily: "'JetBrains Mono', monospace",
+                      lineHeight: 1.6
+                    }}>
+                     Json Format:
+                      <pre style={{
+                        background: "var(--surface2)",
+                        padding: "8px",
+                        borderRadius: "6px",
+                        marginTop: "6px",
+                        overflow: "auto"
+                      }}>
+                  {`{
+                    "sample": [
+                      { "input": "2 3 {// if double line input then use }\\n 9 like this", "output": "5" }
+                    ],
+                    "hidden": [
+                      { "input": "10 20", "output": "30" }
+                    ]
+                  }`}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+                {form.qtype !== "public" && "OR"}
+                <div className="tc-grid">
+                  {allTCs.map(({ tc, type, i, label }) => (
+                    <div className="tc-card" key={`${type}-${i}`}>
+                      <div className="tc-card-header">
+                        <span className="tc-num">Case #{i + 1}</span>
+                        <span className={`tc-type-badge ${label === "Sample" ? "tb-sample" : "tb-hidden"}`}>{label}</span>
+                        <span className="tc-spacer" />
+                        {form.qtype !== "public" && (
                           <button className="tc-del-btn" onClick={() => removeTC(type, i)}>✕ Remove</button>
+                        )}
+                      </div>
+                      <div className="tc-body">
+                        <div className="tc-field">
+                          <div className="tc-field-label">Input</div>
+                          <textarea
+                            className="tc-field-input"
+                            placeholder={"2 7 11 15 \n9"}
+                            value={tc.input}
+                            onChange={e => updateTC(type, i, "input", e.target.value)}
+                            disabled={form.qtype === "public"}
+                          />
                         </div>
-                        <div className="tc-body">
-                          <div className="tc-field">
-                            <div className="tc-field-label">Input</div>
-                            <textarea
-                              className="tc-field-input"
-                              placeholder={"2 7 11 15 \n9"}
-                              value={tc.input}
-                              onChange={e => updateTC(type, i, "input", e.target.value)}
-                            />
-                          </div>
-                          <div className="tc-field">
-                            <div className="tc-field-label">Expected Output</div>
-                            <textarea
-                              className="tc-field-input"
-                              placeholder={"[0,1]"}
-                              value={tc.output}
-                              onChange={e => updateTC(type, i, "output", e.target.value)}
-                            />
-                          </div>
+                        <div className="tc-field">
+                          <div className="tc-field-label">Expected Output</div>
+                          <textarea
+                            className="tc-field-input"
+                            placeholder={"[0,1]"}
+                            value={tc.output}
+                            onChange={e => updateTC(type, i, "output", e.target.value)}
+                            disabled={form.qtype === "public"}
+                          />
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                </div>
 
+                {form.qtype !== "public" && (
                   <div className="tc-add-row">
                     <button className="tc-add-btn tc-add-sample" onClick={() => addTC("sampletcs")}>
                       ＋ Add Sample Test Case
@@ -679,31 +702,39 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                       ＋ Add Hidden Test Case
                     </button>
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* ── SUMMARY ── */}
-                <div className="form-section">
-                  <div className="fs-label">Summary</div>
-                  <div style={{ display: "flex", gap: 12 }}>
-                    {[
-                      { label: "Difficulty", value: form.tag, color: form.tag === "Easy" ? "var(--green)" : form.tag === "Medium" ? "var(--amber)" : "var(--red)" },
-                      { label: "Time Limit", value: `${form.timelimit}s`, color: "var(--text)" },
-                      { label: "Sample TCs", value: form.sampletcs.length, color: "var(--cyan)" },
-                      { label: "Hidden TCs", value: form.hiddentcs.length, color: "var(--amber)" },
-                    ].map(s => (
-                      <div key={s.label} style={{ flex: 1, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 9, padding: "16px 18px" }}>
-                        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "1px" }}>{s.label}</div>
-                        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "1.3rem", fontWeight: 700, color: s.color }}>{s.value}</div>
-                      </div>
-                    ))}
-                  </div>
+              {/* ── SUMMARY ── */}
+              <div className="form-section">
+                <div className="fs-label">Summary</div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  {[
+                    { label: "Difficulty", value: form.tag, color: form.tag === "Easy" ? "var(--green)" : form.tag === "Medium" ? "var(--amber)" : "var(--red)" },
+                    { label: "Time Limit", value: `${form.timelimit}s`, color: "var(--text)" },
+                    { label: "Sample TCs", value: form.sampletcs.length, color: "var(--cyan)" },
+                    { label: "Hidden TCs", value: form.hiddentcs.length, color: "var(--amber)" },
+                  ].map(s => (
+                    <div key={s.label} style={{ flex: 1, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 9, padding: "16px 18px" }}>
+                      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "1px" }}>{s.label}</div>
+                      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "1.3rem", fontWeight: 700, color: s.color }}>{s.value}</div>
+                    </div>
+                  ))}
                 </div>
+              </div>
 
-                {/* bottom save */}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingBottom: 12 }}>
-                  <button className="discard-btn" onClick={() => setSelected(null)}>✕ Discard</button>
+              {/* bottom save */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingBottom: 12 }}>
+                <button className="discard-btn" onClick={() => setSelected(null)}>✕ Discard</button>
+                {form.qtype === "public" ? (
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontStyle: "italic", alignSelf: "center", marginRight: 12 }}>
+                    Public Question (Read-only)
+                  </span>
+                ) : (
                   <button className="save-btn" onClick={handleSaveQuestion}>↓ Save Question</button>
-                </div>
+                )}
+              </div>
+
               </div>
             </>
           )}

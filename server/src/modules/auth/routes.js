@@ -1,6 +1,7 @@
 import express from "express";
 import authController from "./controller.js";
 import userModel from "../../models/user.js";
+import jwt from "jsonwebtoken";
 const router=express.Router();
 router.post("/login",authController.login);
 router.post("/signup",authController.signup);
@@ -16,7 +17,7 @@ function generateAccessToken(user) {
     { expiresIn: "30d" }
   );
 }
-router.post("/refrsh",async (req, res) => {
+router.post("/refresh",async (req, res) => {
 
   const refreshToken = req.cookies.refreshToken;
 
@@ -40,6 +41,7 @@ router.post("/refrsh",async (req, res) => {
   }
 }
 );
+import authMiddleware from "../../middleware/authmiddleware.js";
 // router.get("/me",async(req,res,next)=>{
 // try {
 //     const token = req.cookies.accessToken;
@@ -68,4 +70,7 @@ router.post("/refrsh",async (req, res) => {
 //   }
 
 // })
+
+router.put("/profile", authMiddleware, authController.updateProfile);
+
 export default router;

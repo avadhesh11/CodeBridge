@@ -1,0 +1,33 @@
+
+services:
+  backend:
+    build: ./server
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGO_URI=mongodb+srv://avadheshnagar022_db_user:yJK2nzM2ryQtC8ze@codebridge.h6brtjx.mongodb.net/
+      - ACCESS_SECRET=ava25
+      - REFRESH_SECRET=ava25
+      - FRONTEND_URL=http://localhost:3000
+    depends_on:
+      - mongo
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+
+  frontend:
+    build: ./Frontend
+    
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

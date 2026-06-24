@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../utils/api";
+import { useAuth } from "../context/authContext";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -53,9 +56,9 @@ const styles = `
   /* SESSIONS TABLE */
   .section-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 16px; }
   .sessions-table { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 32px; }
-  .table-header { display: grid; grid-template-columns: 1fr 1.5fr 1fr 1fr 1fr 80px; gap: 0; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  .table-header { display: grid; grid-template-columns: 1fr 1.5fr 3fr 1fr 100px; gap: 0; padding: 12px 20px; border-bottom: 1px solid var(--border); }
   .th { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-  .table-row { display: grid; grid-template-columns: 1fr 1.5fr 1fr 1fr 1fr 80px; gap: 0; padding: 16px 20px; border-bottom: 1px solid var(--border); align-items: center; transition: background 0.15s; cursor: pointer; }
+  .table-row { display: grid; grid-template-columns: 1fr 1.5fr 3fr 1fr 100px; gap: 0; padding: 16px 20px; border-bottom: 1px solid var(--border); align-items: center; transition: background 0.15s; cursor: pointer; }
   .table-row:last-child { border-bottom: none; }
   .table-row:hover { background: var(--surface2); }
   .td-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
@@ -113,9 +116,103 @@ const questions = [
   { title: "Median of Two Sorted Arrays", diff: "Hard", tags: ["Binary Search"] },
 ];
 
+const renderRoomQuestions = (room) => {
+  // Build question list — prefer populated room.questions, fallback to currentQuestion
+  let roomQuestions = [...(room.questions || [])];
+  if (roomQuestions.length === 0 && room.currentQuestion) {
+    roomQuestions = [room.currentQuestion];
+  }
+
+  if (roomQuestions.length === 0) {
+    return <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>No questions assigned</span>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {roomQuestions.map((q) => {
+        const qId = (q._id || q).toString();
+        const qTitle = q.title || "Unknown";
+
+        const candidateSubmissions = (room.submissions || []).filter((s) => {
+          const sQId = (s.question?._id || s.question || "").toString();
+          return sQId === qId;
+        });
+
+        const solvedSub = candidateSubmissions.find((s) => s.verdict === "AC");
+
+        if (solvedSub) {
+          return (
+            <div key={qId} style={{ fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="td-mono" style={{ color: "var(--text)" }}>{qTitle}</span>
+              <span style={{ color: "var(--green)", fontWeight: 700, fontSize: "0.75rem" }}>✓ Solved</span>
+              <span className="qcard-tag" style={{ margin: 0, padding: "1px 6px", fontSize: "0.6rem", color: "var(--green)", borderColor: "var(--green)" }}>
+                {solvedSub.language || "C++"}
+              </span>
+            </div>
+          );
+        } else {
+          const attempted = candidateSubmissions.length > 0;
+          return (
+            <div key={qId} style={{ fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="td-mono" style={{ color: "var(--text-muted)" }}>{qTitle}</span>
+              {attempted ? (
+                <span style={{ color: "var(--red)", fontWeight: 700, fontSize: "0.75rem" }}>✕ Attempted</span>
+              ) : (
+                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>○ Unsolved</span>
+              )}
+            </div>
+          );
+        }
+      })}
+    </div>
+  );
+};
+
 export default function DashboardPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeNav, setActiveNav] = useState("Sessions");
   const [showModal, setShowModal] = useState(false);
+
+  const [rooms, setRooms] = useState([]);
+  const [publicQuestions, setPublicQuestions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const [roomsRes, questionsRes] = await Promise.all([
+          api("get", "room/user/all"),
+          api("get", "question/public")
+        ]);
+        setRooms(roomsRes.data.rooms || []);
+        const qFetched = questionsRes.data.questions || [];
+        setPublicQuestions(qFetched.length > 0 ? qFetched : questions.map(q => ({
+          _id: q.title,
+          title: q.title,
+          tag: q.diff,
+          timelimit: 2,
+          sampletcs: []
+        })));
+      } catch (error) {
+        console.error("Failed to fetch dashboard data:", error);
+        setPublicQuestions(questions.map(q => ({
+          _id: q.title,
+          title: q.title,
+          tag: q.diff,
+          timelimit: 2,
+          sampletcs: []
+        })));
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDashboardData();
+  }, []);
+
+  const userInitials = user?.name
+    ? user.name.split(" ").map(n => n[0]).join("")
+    : "U";
 
   return (
     <>
@@ -123,12 +220,12 @@ export default function DashboardPage() {
       <div className="dash-layout">
 
         {/* SIDEBAR */}
-        <div className="sidebar">
-          <div className="sidebar-logo">Code<span>Bridge</span></div>
+        <div className="sidebar" style={{cursor:"pointer"}}>
+          <div onClick={() => navigate("/")} className="sidebar-logo">Code<span>Bridge</span></div>
           <div className="sidebar-nav">
             {[
               {icon:"⊡",label:"Sessions"},
-              {icon:"◧",label:"Questions"},
+      
               {icon:"◈",label:"Analytics"},
               {icon:"⊞",label:"Candidates"},
               {icon:"◉",label:"Settings"},
@@ -139,11 +236,17 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-          <div className="sidebar-user">
-            <div className="user-ava">IM</div>
+          <div className="sidebar-user" onClick={() => navigate("/profile")} style={{ cursor: "pointer" }}>
+            <div className="user-ava">
+              {user?.avatar ? (
+                <img src={user.avatar} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} alt="avatar" />
+              ) : (
+                userInitials
+              )}
+            </div>
             <div>
-              <div className="user-info-name">Interviewer</div>
-              <div className="user-info-role">interviewer</div>
+              <div className="user-info-name">{user?.name || "User"}</div>
+              <div className="user-info-role">{user?.role || "user"}</div>
             </div>
           </div>
         </div>
@@ -156,16 +259,15 @@ export default function DashboardPage() {
                 <div className="dash-title">Interview Sessions</div>
                 <div className="dash-sub">$ codebridge --list-sessions</div>
               </div>
-              <button className="btn-new" onClick={()=>setShowModal(true)}>+ New Session</button>
+              <button className="btn-new" onClick={()=>navigate("/create")}>+ New Session</button>
             </div>
 
             {/* STATS */}
             <div className="stats-row">
               {[
-                {label:"Total Sessions",num:"24",change:"+3 this week",up:true},
-                {label:"Pass Rate",num:"58%",change:"+5% vs last month",up:true},
-                {label:"Avg Duration",num:"47m",change:"-3m vs last month",up:true},
-                {label:"Active Now",num:"1",change:"1 live session",up:false},
+                {label:"Total Sessions",num:rooms.length,change:"All created rooms",up:true},
+                {label:"Pass Rate",num:`${rooms.length > 0 ? Math.round((rooms.filter(r => r.submissions?.some(s => s.verdict === "AC")).length / rooms.length) * 100) : 0}%`,change:"AC on hidden testcases",up:true},
+                {label:"Active Now",num:rooms.filter(r => r.status === "active").length,change:"Live interview rooms",up:false},
               ].map((s,i) => (
                 <div className="stat-card" key={i}>
                   <div className="stat-card-label">{s.label}</div>
@@ -180,22 +282,45 @@ export default function DashboardPage() {
             <div className="sessions-table">
               <div className="table-header">
                 <div className="th">Session ID</div>
-                <div className="th">Candidate</div>
-                <div className="th">Problem</div>
+                <div className="th">Candidate/Interviewer</div>
+                <div className="th">Questions & Solved Status</div>
                 <div className="th">Status</div>
-                <div className="th">Date</div>
                 <div className="th"></div>
               </div>
-              {sessions.map((s,i) => (
-                <div className="table-row" key={i}>
-                  <div className="td-mono" style={{color:"var(--cyan)"}}>{s.id}</div>
-                  <div style={{fontSize:"0.875rem",fontWeight:600}}>{s.candidate}</div>
-                  <div className="td-mono td-muted">{s.problem}</div>
-                  <div><span className={`status-pill ${s.status==="live"?"sp-live":s.status==="scheduled"?"sp-scheduled":"sp-done"}`}>{s.status==="live"?"● Live":s.status==="scheduled"?"◌ Scheduled":"✓ Done"}</span></div>
-                  <div className="td-mono td-muted" style={{fontSize:"0.75rem"}}>{s.date}</div>
-                  <div>{s.status==="live"?<button className="join-btn">Join →</button>:<button className="view-btn">View</button>}</div>
+              {loading ? (
+                <div style={{ padding: "60px 0", textAlign: "center", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>
+                  Loading sessions...
                 </div>
-              ))}
+              ) : rooms.length === 0 ? (
+                <div style={{ padding: "60px 0", textAlign: "center", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: "12px" }}>📭</div>
+                  <div style={{ fontWeight: 700, color: "var(--text)", fontSize: "1rem", marginBottom: "8px" }}>No sessions yet</div>
+                  <div>Create a new session to get started</div>
+                </div>
+              ) : rooms.map((room) => {
+                const isInterviewer = (room.interviewer?._id || room.interviewer)?.toString() === user?._id?.toString();
+                const otherUser = isInterviewer ? room.candidate : room.interviewer;
+                const otherUserName = otherUser?.name || (isInterviewer ? "Waiting for candidate..." : "Interviewer");
+                const displayId = `#${room.roomID.substring(0, 5)}`;
+                const statusLabel = room.status === "active" ? "● Live" : "✓ Done";
+                const statusClass = room.status === "active" ? "sp-live" : "sp-done";
+
+                return (
+                  <div className="table-row" key={room._id} onClick={() => room.status === "active" && navigate(`/code/${room.roomID}`)} style={{ cursor: room.status === "active" ? "pointer" : "default" }}>
+                    <div className="td-mono" style={{color:"var(--cyan)"}}>{displayId}</div>
+                    <div style={{fontSize:"0.875rem",fontWeight:600}}>{otherUserName}</div>
+                    <div>{renderRoomQuestions(room)}</div>
+                    <div><span className={`status-pill ${statusClass}`}>{statusLabel}</span></div>
+                    <div>
+                      {room.status === "active" ? (
+                        <button className="join-btn" onClick={(e) => { e.stopPropagation(); navigate(`/code/${room.roomID}`); }}>Join →</button>
+                      ) : (
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>Expired</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>}
 
@@ -208,11 +333,14 @@ export default function DashboardPage() {
               <button className="btn-new">+ Add Question</button>
             </div>
             <div className="qbank-grid">
-              {questions.map((q,i) => (
-                <div className="qcard" key={i}>
-                  <div className={`qcard-diff qd-${q.diff.toLowerCase()}`}>{q.diff}</div>
+              {publicQuestions.map((q,i) => (
+                <div className="qcard" key={q._id}>
+                  <div className={`qcard-diff qd-${q.tag.toLowerCase()}`}>{q.tag}</div>
                   <div className="qcard-title">{q.title}</div>
-                  <div style={{marginTop:8}}>{q.tags.map(t => <span className="qcard-tag" key={t}>{t}</span>)}</div>
+                  <div style={{marginTop:8}}>
+                    <span className="qcard-tag">{q.timelimit}s limit</span>
+                    <span className="qcard-tag">{q.sampletcs?.length || 0} sample TCs</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -227,33 +355,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* CREATE MODAL */}
-        {showModal && (
-          <div className="modal-overlay" onClick={()=>setShowModal(false)}>
-            <div className="modal" onClick={e=>e.stopPropagation()}>
-              <div className="modal-title">New Interview Session</div>
-              <div className="modal-sub">$ codebridge --create-session</div>
-              <div className="form-group">
-                <label className="form-label">Candidate Name</label>
-                <input className="form-input" placeholder="Enter candidate's name" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Problem</label>
-                <select className="form-input form-select">
-                  {questions.map(q => <option key={q.title}>{q.title} ({q.diff})</option>)}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Scheduled Time (optional)</label>
-                <input className="form-input" type="datetime-local" />
-              </div>
-              <div className="modal-actions">
-                <button className="modal-cancel" onClick={()=>setShowModal(false)}>Cancel</button>
-                <button className="modal-create" onClick={()=>setShowModal(false)}>Create Session →</button>
-              </div>
-            </div>
-          </div>
-        )}
+
 
       </div>
     </>

@@ -23,5 +23,5 @@ const questionSchema=new mongoose.Schema({
     constraints:{type:String}
 })
 
-const quesmodel=mongoose.model("Questions",questionSchema);
+const quesmodel=mongoose.model("Question",questionSchema);
 export default quesmodel;

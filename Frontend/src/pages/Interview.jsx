@@ -135,11 +135,17 @@ export default function InterviewPage() {
   const [role, setRole] = useState(null);
   const [allQuestions, setAllQuestions] = useState([]);
   const [questions, setQuestions] = useState(null);
+  const [submissions, setSubmissions] = useState([]);
+
   const [leftWidth, setLeftWidth] = useState(Number(localStorage.getItem("leftWidth")) || 550);
   const [testHeight, setTestHeight] = useState(Number(localStorage.getItem("testHeight")) || 250);
   const [screenSharing, setScreenSharing] = useState(false);
   const [screenShared, setScreenShared] = useState(false);
-
+const [candidateFullscreenWarning, setCandidateFullscreenWarning] = useState(false);
+const [interviewerDecisionPopup, setInterviewerDecisionPopup] = useState(false);
+const [warningMessage, setWarningMessage] = useState("");
+const [fullscreenViolations, setFullscreenViolations] = useState(0);
+const fullscreenLockRef = useRef(false);
   const waitForMedia = () =>
     new Promise((resolve) => {
       if (localStreamRef.current) return resolve();
@@ -257,6 +263,55 @@ useEffect(() => {
     startMedia();
   }, []);
 
+  const enterSecureFullscreen = async () => {
+  try {
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) await elem.requestFullscreen();
+    else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
+    else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
+  } catch (err) {
+    console.log("fullscreen failed", err);
+  }
+};
+
+const sendCandidateWarning = () => {
+  socket.emit("interviewer-warn-candidate");
+  setInterviewerDecisionPopup(false);
+};
+
+const ignoreCandidateViolation = () => {
+  setInterviewerDecisionPopup(false);
+};
+useEffect(() => {
+  if (role === "candidate") {
+    setTimeout(() => {
+      enterSecureFullscreen();
+    }, 1000);
+  }
+}, [role]);
+
+
+// ============================================
+// 4. DETECT FULLSCREEN EXIT
+// ============================================
+useEffect(() => {
+  const handleFullscreenChange = () => {
+    if (role !== "candidate") return;
+
+    if (!document.fullscreenElement) {
+      setCandidateFullscreenWarning(true);
+      socket.emit("candidate-left-fullscreen");
+      setFullscreenViolations(prev => prev + 1);
+    }
+  };
+
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+  return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+}, [role]);
+
+
+
+
   useEffect(() => {
     if (!roomID) { alert("no room found!"); navigate("/"); return; }
 
@@ -365,16 +420,44 @@ useEffect(() => {
  
     });
     
-    
+    socket.on("candidate-left-fullscreen-alert", () => {
+  if (role === "interviewer") setInterviewerDecisionPopup(true);
+});
+
+socket.on("candidate-warning", () => {
+  if (role === "candidate") {
+    setWarningMessage("⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.");
+    setTimeout(() => setWarningMessage(""), 5000);
+  }
+});
+
+    socket.on("session-ended", () => {
+      alert("The interview session has been ended.");
+      navigate("/dashboard");
+    });
 
     return () => {
-      ["joined-successfully", "error-message", "code-update", "question-selected",
+      ["joined-successfully", "error-message", "code-update","candidate-left-fullscreen-alert","candidate-warning", "question-selected",
         "chat", "chat-history", "webrtc-offer", "webrtc-answer", "webrtc-ice",
-        "start-call", "screen-share-start", "screen-share-stop"
+        "start-call", "screen-share-start", "screen-share-stop", "session-ended"
       ].forEach(e => socket.off(e));
       socket.disconnect();
     };
-  }, [roomID]);
+  }, [roomID,role]);
+
+  const handleEndSession = () => {
+    if (role === "interviewer") {
+      const confirmEnd = window.confirm("Are you sure you want to end this interview session? This will close the room for the candidate as well.");
+      if (confirmEnd) {
+        socket.emit("end-session");
+      }
+    } else {
+      const confirmLeave = window.confirm("Are you sure you want to leave the interview session?");
+      if (confirmLeave) {
+        navigate("/dashboard");
+      }
+    }
+  };
 
   const sendMsg = () => {
     if (!chatMsg.trim()) return;
@@ -385,18 +468,32 @@ useEffect(() => {
   const fetchQuestions = async () => {
     try {
       const res = await api("get", `question/private/${roomID}`);
-      setAllQuestions(res.data.questions);
+      const publicRes = await api("get", `question/public/${roomID}`);
+      const allQ = [...(publicRes.data.questions || []), ...(res.data.questions || [])];
+      setAllQuestions(allQ);
     } catch (error) {
       console.log("unable to fetch questions", error);
     }
   };
+
+  const fetchSubmissions = async () => {
+    try {
+      const res = await api("get", `room/${roomID}`);
+      if (res.data?.room?.submissions) {
+        setSubmissions(res.data.room.submissions);
+      }
+    } catch (error) {
+      console.log("unable to fetch submissions", error);
+    }
+  };
+
 
   const handleRun = async () => {
     if (!questions) return;
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
-      const res = await api("post", "room/codeTest", { code, questionId: questions._id, type: "sample" });
+      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "sample", language: "C++" });
       const { verdict, results, error } = res.data;
       if (verdict === "CE") return setVerdict({ status: "error", output: "Compile error", error });
       if (verdict === "RE") return setVerdict({ status: "error", output: "Runtime error", error });
@@ -420,7 +517,7 @@ useEffect(() => {
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
-      const res = await api("post", "room/codeTest", { code, questionId: questions._id, type: "hidden" });
+      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "hidden", language: "C++" });
       const { verdict, error } = res.data;
       if (verdict === "CE") return setVerdict({ status: "error", error });
       if (verdict === "AC") {
@@ -430,6 +527,7 @@ useEffect(() => {
         setVerdict({ status: "error", output: "Final Verdict: Failed on a hidden test-case" });
       }
       setSubmissionResult(verdict);
+      fetchSubmissions();
     } catch {
       setVerdict({ status: "error", error: "Submission failed" });
     }
@@ -442,7 +540,11 @@ useEffect(() => {
     window.location.reload();
   };
 
-  useEffect(() => { fetchQuestions(); }, []);
+  useEffect(() => {
+    fetchQuestions();
+    fetchSubmissions();
+  }, []);
+
 
   const diffColor = { Easy: "green", Medium: "orange", Hard: "red" };
 
@@ -450,8 +552,8 @@ useEffect(() => {
     <>
       <style>{styles}</style>
 
-      <div className="topbar">
-        <div className="topbar-logo">Code<span>Bridge</span></div>
+      <div className="topbar" >
+        <div  className="topbar-logo">Code<span>Bridge</span></div>
         <div className="topbar-sep" />
         <select
           style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)", padding: "5px 10px", borderRadius: "6px", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.75rem" }}
@@ -473,7 +575,9 @@ useEffect(() => {
           <button className="topbar-btn btn-screen" onClick={screenSharing ? stopScreenShare : startScreenShare}>
             {screenSharing ? "Stop Sharing" : "Start Screen Share"}
           </button>
-          <button className="topbar-btn btn-end">✕ End Session</button>
+          <button className="topbar-btn btn-end" onClick={handleEndSession}>
+            {role === "interviewer" ? "✕ End Session" : "✕ Leave Session"}
+          </button>
         </div>
       </div>
 
@@ -504,19 +608,47 @@ useEffect(() => {
             ) : (
               <>
                 <div className="prob-section-title" style={{ marginBottom: 16 }}>Recent Submissions</div>
-                {[
-                  { v: "Accepted", t: "12ms", m: "9.2MB", time: "2 min ago", color: "var(--green)" },
-                  { v: "Wrong Answer", t: "8ms", m: "8.1MB", time: "5 min ago", color: "var(--red)" },
-                  { v: "Compilation Error", t: "—", m: "—", time: "8 min ago", color: "var(--amber)" },
-                ].map((s, i) => (
-                  <div key={i} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", marginBottom: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.75rem", fontWeight: 700, color: s.color }}>{s.v}</span>
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.65rem", color: "var(--text-muted)" }}>{s.time}</span>
-                    </div>
-                    <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.7rem", color: "var(--text-muted)" }}>{s.t} · {s.m}</div>
+                {submissions.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", fontFamily: "'JetBrains Mono',monospace", fontSize: "0.75rem", padding: "20px 0" }}>
+                    No submissions yet.
                   </div>
-                ))}
+                ) : (
+                  [...submissions].reverse().map((s, i) => {
+                    const verdictInfo = {
+                      AC: { label: "Accepted", color: "var(--green)" },
+                      WA: { label: "Wrong Answer", color: "var(--red)" },
+                      TLE: { label: "Time Limit Exceeded", color: "var(--amber)" },
+                      CE: { label: "Compilation Error", color: "var(--amber)" },
+                      RE: { label: "Runtime Error", color: "var(--red)" },
+                    };
+                    const info = verdictInfo[s.verdict] || { label: s.verdict || "Submitted", color: "var(--text)" };
+                    
+                    const formatTimeAgo = (dateStr) => {
+                      const diff = Date.now() - new Date(dateStr).getTime();
+                      const minutes = Math.floor(diff / 60000);
+                      if (minutes < 1) return "Just now";
+                      if (minutes === 1) return "1 min ago";
+                      if (minutes < 60) return `${minutes} min ago`;
+                      const hours = Math.floor(minutes / 60);
+                      if (hours === 1) return "1 hour ago";
+                      if (hours < 24) return `${hours} hours ago`;
+                      return new Date(dateStr).toLocaleDateString();
+                    };
+
+                    return (
+                      <div key={i} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.75rem", fontWeight: 700, color: info.color }}>{info.label}</span>
+                          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.65rem", color: "var(--text-muted)" }}>{formatTimeAgo(s.createdAt)}</span>
+                        </div>
+                        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
+                          <span>{s.question?.title || "Unknown Question"}</span>
+                          <span>{s.language || "C++"}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </>
             )}
           </div>
@@ -686,6 +818,93 @@ useEffect(() => {
             Camera Off
           </div>
         )}
+        {/* Candidate forced re-enter fullscreen popup */}
+        {candidateFullscreenWarning && (
+  <div style={{
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.85)",
+    zIndex: 9999,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  }}>
+    <div style={{
+      background: "#111",
+      border: "1px solid red",
+      borderRadius: "12px",
+      padding: "30px",
+      textAlign: "center",
+      width: "420px"
+    }}>
+      <h2 style={{ color: "red", marginBottom: "12px" }}>Secure Interview Mode Exited</h2>
+      <p style={{ color: "#aaa", marginBottom: "20px" }}>
+        You left fullscreen interview mode. Please re-enter immediately for fairness.
+      </p>
+      <button
+        onClick={() => {
+          enterSecureFullscreen();
+          setCandidateFullscreenWarning(false);
+        }}
+        style={{
+          padding: "10px 22px",
+          background: "red",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          cursor: "pointer"
+        }}
+      >
+        Re-enter Fullscreen
+      </button>
+    </div>
+  </div>
+)}
+
+{/* Interviewer decision popup */}
+{interviewerDecisionPopup && (
+  <div style={{
+    position: "fixed",
+    top: "20px",
+    right: "20px",
+    background: "#161b22",
+    border: "1px solid orange",
+    borderRadius: "10px",
+    padding: "18px",
+    zIndex: 9999,
+    width: "320px"
+  }}>
+    <div style={{ color: "orange", fontWeight: 800, marginBottom: "10px" }}>
+      Candidate left fullscreen mode.
+    </div>
+    <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "14px" }}>
+      Ask candidate to re-enter secure mode?
+    </div>
+    <div style={{ display: "flex", gap: "10px" }}>
+      <button onClick={sendCandidateWarning} style={{ flex: 1, padding: "8px", background: "orange", border: "none", borderRadius: "6px", cursor: "pointer" }}>Warn Candidate</button>
+      <button onClick={ignoreCandidateViolation} style={{ flex: 1, padding: "8px", background: "#333", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>Leave This Time</button>
+    </div>
+  </div>
+)}
+
+{/* candidate top red warning bar */}
+{warningMessage && (
+  <div style={{
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    background: "rgba(255,0,0,0.85)",
+    color: "white",
+    textAlign: "center",
+    padding: "10px",
+    zIndex: 9999,
+    fontWeight: 700
+  }}>
+    {warningMessage}
+  </div>
+)}
+
       </div>
     </>
   );

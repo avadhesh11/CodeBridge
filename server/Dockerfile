@@ -1,5 +1,5 @@
 # Use Node base image
-FROM node:18
+FROM node:20
 
 # Install g++ for C++ execution
 RUN apt-get update && apt-get install -y g++

@@ -8,6 +8,8 @@ router.post("/add/:roomId", authMiddleware, controller.addQuestion);
 
 router.get("/public", controller.fetchPublicQuestions);
 
+router.get("/public/:roomId", controller.fetchPublicQuestionsByRoom);
+
 router.get("/private/:roomId", authMiddleware, controller.fetchPrivateQuestions);
 
 router.get("/:id", controller.getQuestion);

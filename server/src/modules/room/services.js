@@ -27,14 +27,19 @@ import { runSample, runHidden } from "../../services/executionService.js";
 // };
 
 class roomServices{
-newRoom=async(userid,name)=>{
+newRoom=async(userid, name, questionIds=[])=>{
     const roomID=nanoid(8);
-    const room=await roomModel.create({
+    const roomData = {
         roomID,
-        roomName:name,
-        interviewer:userid,
-        status:"active"
-    });
+        roomName: name,
+        interviewer: userid,
+        status: "active"
+    };
+    if (questionIds.length > 0) {
+        roomData.questions = questionIds;
+        roomData.currentQuestion = questionIds[0]; // first question shown by default
+    }
+    const room = await roomModel.create(roomData);
     await room.save();
     return roomID;
 }
@@ -44,7 +49,8 @@ newRoom=async(userid,name)=>{
       .findOne({ roomID })
       .populate("interviewer", "name email")
       .populate("candidate", "name email")
-      .populate("questions");
+      .populate("questions")
+      .populate("submissions.question");
 
   }
 
@@ -59,40 +65,74 @@ newRoom=async(userid,name)=>{
     return room.questions;
   }
 
-runCode = async (code,questionId, type = "sample") => {
+  // Get ALL questions for a room: public (from room.questions[]) + private (by roomId field)
+  async getAllRoomQuestionsForManager(roomID) {
+    const room = await roomModel
+      .findOne({ roomID })
+      .populate("questions");
+
+    if (!room) throw new Error("Room not found");
+
+    // Public questions already stored in room.questions[]
+    const publicQs = (room.questions || []).map(q => ({
+      ...q.toObject(),
+      _source: "public"
+    }));
+
+    // Private questions created specifically for this room
+    const privateQs = await questionModel.find({ qtype: "private", roomId: roomID });
+    const privateArr = privateQs.map(q => ({
+      ...q.toObject(),
+      _source: "private"
+    }));
+
+    return [...privateArr, ...publicQs];
+  }
+
+runCode = async (code, questionId, type = "sample", roomID = null, userId = null, language = "C++") => {
   if (!code) {
     return { verdict: "INVALID", error: "Code required" };
   }
 
-
   const question = await questionModel.findById(questionId);
 
   if (!question) {
-  
     return { verdict: "INVALID", error: "Question not found" };
   }
 
   try {
+    let result;
     if (type === "sample") {
- 
-   const result= await runSample({
+      result = await runSample({
         testcases: question.sampletcs,
         timelimit: question.timelimit || 2
       }, code);
-
-      return result;
+    } else {
+      result = await runHidden({
+        testcases: question.hiddentcs,
+        timelimit: question.timelimit || 2
+      }, code);
     }
 
-    return await runHidden({
-      testcases: question.hiddentcs,
-      timelimit: question.timelimit
-    }, code);
+    if (type === "hidden" && roomID && userId) {
+      const room = await roomModel.findOne({ roomID });
+      if (room) {
+        room.submissions.push({
+          user: userId,
+          question: questionId,
+          verdict: result.verdict,
+          code,
+          language: language || "C++",
+          createdAt: new Date()
+        });
+        await room.save();
+      }
+    }
 
-
+    return result;
   } catch (err) {
-  console.error("🔥 EXECUTION CRASH:", err);
-  return { verdict: "ERROR", error: err.message };
-
+    console.error("🔥 EXECUTION CRASH:", err);
+    return { verdict: "ERROR", error: err.message };
   }
 };
   async closeRoom(roomID) {
@@ -106,6 +146,22 @@ runCode = async (code,questionId, type = "sample") => {
     await room.save();
 
     return room;
+  }
+
+  async getUserRooms(userid) {
+    return await roomModel
+      .find({
+        $or: [
+          { interviewer: userid },
+          { candidate: userid }
+        ]
+      })
+      .populate("interviewer", "name email")
+      .populate("candidate", "name email")
+      .populate("currentQuestion")
+      .populate("questions")
+      .populate("submissions.question")
+      .sort({ createdAt: -1 });
   }
 
 

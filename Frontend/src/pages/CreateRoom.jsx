@@ -95,7 +95,7 @@ const css = `
   .q-search-input:focus { border-color: var(--green); }
   .q-search-input::placeholder { color: var(--text-muted); }
 
-  .q-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; padding-right: 2px; }
+  .q-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; padding-right: 2px; }
   .q-list::-webkit-scrollbar { width: 3px; }
   .q-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
@@ -115,13 +115,29 @@ const css = `
 
   .q-title { flex: 1; font-size: 0.875rem; font-weight: 700; }
   .q-meta { font-family: 'JetBrains Mono', monospace; font-size: 0.67rem; color: var(--text-muted); display: flex; gap: 8px; }
+  /* checkbox style — square for multi-select */
   .q-check {
-    width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border);
+    width: 20px; height: 20px; border-radius: 5px; border: 2px solid var(--border);
     display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s;
   }
   .q-row.selected .q-check { border-color: var(--green); background: var(--green); }
-  .q-check-inner { width: 8px; height: 8px; background: #000; border-radius: 50%; display: none; }
+  .q-check-inner { font-size: 0.7rem; color: #000; display: none; font-weight: 900; }
   .q-row.selected .q-check-inner { display: block; }
+
+  /* selected questions summary bar */
+  .q-selected-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--green-dim); border: 1px solid var(--green); border-radius: 8px;
+    padding: 8px 14px; margin-bottom: 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  }
+  .q-selected-count { color: var(--green); font-weight: 700; }
+  .q-clear-btn {
+    background: transparent; border: none; color: var(--text-muted);
+    font-size: 0.67rem; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    font-weight: 700; padding: 2px 6px; border-radius: 4px; transition: color 0.15s;
+  }
+  .q-clear-btn:hover { color: var(--red); }
 
   /* ── SETTINGS TILES ── */
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -239,7 +255,7 @@ const css = `
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 `;
 
-const QUESTIONS = [
+const FALLBACK_QUESTIONS = [
   { _id: "q1", tag: "Easy",   title: "Two Sum",            sampletcs: 2, hiddentcs: 4, timelimit: 2 },
   { _id: "q2", tag: "Easy",   title: "Valid Parentheses",  sampletcs: 1, hiddentcs: 3, timelimit: 2 },
   { _id: "q3", tag: "Medium", title: "Merge Intervals",    sampletcs: 1, hiddentcs: 3, timelimit: 2 },
@@ -260,31 +276,61 @@ export default function CreateRoomPage() {
     candidateName: "",
     candidateEmail: "",
     roomName: "",
-    selectedQuestion: null,
     duration: "60 min",
     videoEnabled: true,
     screenShare: true,
     chatEnabled: true,
     codeExecution: true,
   });
+  const [selectedQuestions, setSelectedQuestions] = useState(new Set());
   const [qSearch, setQSearch] = useState("");
   const [errors, setErrors] = useState({});
   const [roomId,setRoomid] = useState("");
   const [copied, setCopied] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [publicQuestions, setPublicQuestions] = useState([]);
 
-const handleCreate = async () => {
-  try {
-    const res = await api("post","room/new");
+  useEffect(() => {
+    const fetchPublicQuestions = async () => {
+      try {
+        const res = await api("get", "question/public");
+        const fetched = res.data.questions || [];
+        setPublicQuestions(fetched.length > 0 ? fetched : FALLBACK_QUESTIONS);
+      } catch (err) {
+        console.error("Failed to fetch public questions:", err);
+        setPublicQuestions(FALLBACK_QUESTIONS);
+      }
+    };
+    fetchPublicQuestions();
+  }, []);
 
-    setRoomid(res.data.roomID);
-    setSuccess(true);
+  const handleCreate = async () => {
+    try {
+      const res = await api("post", "room/new", {
+        name: form.roomName || "Interview Room",
+        questionIds: [...selectedQuestions]
+      });
 
-  } catch(err){
-    console.error(err);
-  }
-};
-  const filteredQ = QUESTIONS.filter(q =>
+      setRoomid(res.data.roomID);
+      setSuccess(true);
+
+    } catch(err){
+      console.error(err);
+    }
+  };
+
+  const toggleQuestion = (id) => {
+    setSelectedQuestions(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearQuestions = () => setSelectedQuestions(new Set());
+
+  const filteredQ = publicQuestions.filter(q =>
     q.title.toLowerCase().includes(qSearch.toLowerCase())
   );
 
@@ -297,8 +343,7 @@ const handleCreate = async () => {
 
   const validate = () => {
     const e = {};
-    if (!form.candidateName.trim()) e.candidateName = "Candidate name is required";
-    if (!form.selectedQuestion)     e.selectedQuestion = "Please select a question";
+    // candidateName check removed (field is optional now)
     return e;
   };
 
@@ -311,7 +356,7 @@ const handleCreate = async () => {
 
   const inviteLink = `${import.meta.env.VITE_FRONTEND_URL}/join/${roomId}`;
 
-  const selectedQ = QUESTIONS.find(q => q._id === form.selectedQuestion);
+  const selectedQList = publicQuestions.filter(q => selectedQuestions.has(q._id));
 
   const features = [
     { key: "videoEnabled",  icon: "📹", label: "Video Call",      desc: "WebRTC peer-to-peer" },
@@ -330,7 +375,7 @@ const handleCreate = async () => {
         <div className="sep" />
         <div className="breadcrumb">Dashboard <span>›</span> <b>Create Room</b></div>
         <div className="spacer" />
-        <button className="back-btn">← Back to Dashboard</button>
+        <button className="back-btn" onClick={() => navigate("/dashboard")}>← Back to Dashboard</button>
       </div>
 
       <div className="page">
@@ -389,9 +434,20 @@ const handleCreate = async () => {
           <div className="form-card">
             <div className="form-card-header">
               <span className="fch-icon">📋</span>
-              <span className="fch-title">Add Public Question</span>
+              <span className="fch-title">Select Public Questions</span>
+              {selectedQuestions.size > 0 && (
+                <span style={{ marginLeft: "auto", background: "var(--green)", color: "#000", borderRadius: "10px", padding: "2px 10px", fontSize: "0.7rem", fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {selectedQuestions.size} selected
+                </span>
+              )}
             </div>
             <div className="form-card-body">
+              {selectedQuestions.size > 0 && (
+                <div className="q-selected-bar">
+                  <span className="q-selected-count">✓ {selectedQuestions.size} question{selectedQuestions.size !== 1 ? "s" : ""} selected</span>
+                  <button className="q-clear-btn" onClick={clearQuestions}>✕ Clear all</button>
+                </div>
+              )}
               <div className="q-search-wrap">
                 <span className="q-search-icon">⌕</span>
                 <input
@@ -401,27 +457,29 @@ const handleCreate = async () => {
                   onChange={e => setQSearch(e.target.value)}
                 />
               </div>
-              {errors.selectedQuestion && (
-                <div className="field-error" style={{ marginTop: -8 }}>⚠ {errors.selectedQuestion}</div>
-              )}
               <div className="q-list">
+                {filteredQ.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.75rem" }}>
+                    No questions found.
+                  </div>
+                )}
                 {filteredQ.map(q => (
                   <div
                     key={q._id}
-                    className={`q-row ${form.selectedQuestion === q._id ? "selected" : ""}`}
-                    onClick={() => update("selectedQuestion", q._id)}
+                    className={`q-row ${selectedQuestions.has(q._id) ? "selected" : ""}`}
+                    onClick={() => toggleQuestion(q._id)}
                   >
                     <span className={`q-diff ${DIFF_MAP[q.tag]}`}>{q.tag}</span>
                     <div style={{ flex: 1 }}>
                       <div className="q-title">{q.title}</div>
                       <div className="q-meta">
                         <span>⏱ {q.timelimit}s</span>
-                        <span>📋 {q.sampletcs} sample</span>
-                        <span>🔒 {q.hiddentcs} hidden</span>
+                        <span>📋 {Array.isArray(q.sampletcs) ? q.sampletcs.length : q.sampletcs} sample</span>
+                        <span>🔒 {Array.isArray(q.hiddentcs) ? q.hiddentcs.length : q.hiddentcs} hidden</span>
                       </div>
                     </div>
                     <div className="q-check">
-                      <div className="q-check-inner" />
+                      <div className="q-check-inner">✓</div>
                     </div>
                   </div>
                 ))}
@@ -471,70 +529,70 @@ const handleCreate = async () => {
 
         {/* ── RIGHT COL: PREVIEW ── */}
         <div className="preview-col">
-          {/* {/* <div className="preview-card"> */}
-         <div className="preview-header">
-                {/*  <span className="preview-title">// room preview</span>
-              <span className="preview-id">{roomId}</span>
+          <div className="preview-card">
+            <div className="preview-header">
+              <span className="preview-title">// room preview</span>
+              {roomId && <span className="preview-id">{roomId}</span>}
             </div>
+
             <div className="preview-body">
+              {/* Room name */}
               <div className="prow">
-                <div className="prow-label">Candidate</div>
-                <div className={`prow-val ${!form.candidateName ? "empty" : ""}`}>
-                  {form.candidateName || "— not set —"}
+                <div className="prow-label">Room Title</div>
+                <div className={`prow-val ${!form.roomName ? "empty" : ""}`}>
+                  {form.roomName || "— not set —"}
                 </div>
               </div>
-              {form.candidateEmail && (
-                <div className="prow">
-                  <div className="prow-label">Email</div>
-                  <div className="prow-val mono">{form.candidateEmail}</div>
-                </div>
-              )}
-              {form.roomName && (
-                <div className="prow">
-                  <div className="prow-label">Label</div>
-                  <div className="prow-val">{form.roomName}</div>
-                </div>
-              )}
+
               <div className="preview-divider" />
+
+              {/* Selected questions list */}
               <div className="prow">
-                <div className="prow-label">Question</div>
-                {selectedQ ? (
-                  <div className="prev-q-badge">
-                    <span className={`q-diff ${DIFF_MAP[selectedQ.tag]}`} style={{ fontSize: "0.6rem" }}>{selectedQ.tag}</span>
-                    <span className="prev-q-badge-title">{selectedQ.title}</span>
-                  </div>
-                ) : (
-                  <div className="prow-val empty">— not selected —</div>
-                )}
-              </div>  */}
-              {/* <div className="prow">
-                <div className="prow-label">Duration</div>
-                <div className="prow-val mono">{form.duration}</div>
-              </div>
-              <div className="preview-divider" />
-              <div className="prow">
-                <div className="prow-label">Features</div>
-                <div className="feature-chips">
-                  {features.map(f => (
-                    <span key={f.key} className={`chip ${form[f.key] ? "on" : ""}`}>
-                      {f.icon} {f.label}
+                <div className="prow-label">
+                  Questions
+                  {selectedQList.length > 0 && (
+                    <span style={{ marginLeft: 6, background: "var(--green)", color: "#000", borderRadius: "8px", padding: "1px 7px", fontSize: "0.6rem", fontWeight: 800 }}>
+                      {selectedQList.length}
                     </span>
-                  ))}
-                </div> */}
-              {/* </div> */}
-            {/* </div> */}
+                  )}
+                </div>
+                {selectedQList.length === 0 ? (
+                  <div className="prow-val empty">— none selected —</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" }}>
+                    {selectedQList.map((q, idx) => (
+                      <div key={q._id} className="prev-q-badge" style={{ justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.6rem", color: "var(--text-muted)", minWidth: "16px" }}>
+                            {idx + 1}.
+                          </span>
+                          <span className={`q-diff ${DIFF_MAP[q.tag]}`} style={{ fontSize: "0.58rem", padding: "1px 6px" }}>{q.tag}</span>
+                          <span className="prev-q-badge-title" style={{ fontSize: "0.78rem" }}>{q.title}</span>
+                        </div>
+                        <button
+                          onClick={() => toggleQuestion(q._id)}
+                          style={{ background: "transparent", border: "none", color: "var(--red)", cursor: "pointer", fontSize: "0.7rem", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, padding: "0 4px", flexShrink: 0 }}
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
             <div className="create-btn-wrap">
               <button
                 className="create-btn"
                 onClick={handleCreate}
-                // disabled={ !form.selectedQuestion}
               >
                 <span>⚡</span> Launch Room
               </button>
             </div>
             <div className="create-btn-sub">
-              Room ID <b style={{ color: "var(--cyan)" }}>{roomId}</b> · auto-expires after session ends
+              {selectedQList.length > 0
+                ? <><b style={{ color: "var(--green)" }}>{selectedQList.length}</b> question{selectedQList.length !== 1 ? "s" : ""} · auto-expires after session ends</>
+                : <>Room ID <b style={{ color: "var(--cyan)" }}>{roomId}</b> · auto-expires after session ends</>
+              }
             </div>
           </div>
         </div>

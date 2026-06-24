@@ -1,4 +1,5 @@
 import quesmodel from "../../models/question.js";
+import roomModel from "../../models/room.js";
 
 class QuestionService {
   // CREATE QUESTION
@@ -13,7 +14,7 @@ class QuestionService {
       hiddentcs: data.hiddentcs || [],
       tag: data.tag || "Easy",
       timelimit: data.timelimit || 2,
-      qtype: data.Qtype || "private",
+      qtype: data.qtype || "private",
       roomId:data.roomId
     });
 
@@ -24,11 +25,20 @@ class QuestionService {
   // GET PUBLIC QUESTIONS
   async getPublicQuestions() {
 
-    return await quesmodel.find({ Qtype: "public" })
+    return await quesmodel.find({ qtype: "public" })
       .select("-hiddentcs")
       .sort({ createdAt: -1 });
 
   }
+
+
+  // GET PUBLIC QUESTIONS BY ROOM
+  async getPublicQuestionsByRoom(roomId) {
+    const room = await roomModel.findOne({ roomID: roomId }).populate("questions");
+    if (!room) return [];
+    return (room.questions || []).filter(q => q.qtype === "public");
+  }
+
 
 
   // GET PRIVATE QUESTIONS

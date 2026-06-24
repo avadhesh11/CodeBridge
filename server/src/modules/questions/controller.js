@@ -17,7 +17,7 @@ class QuestionController {
         qtype
       } = req.body;
      const {roomId}=req.params;
-      if (!title || !description) {
+    if (!title || !description || !constraints || !tag || qtype === "private" && (!sampletcs || !hiddentcs) || qtype === "public" && (!sampletcs)) {
         throw new apiError(400, "Title and description required");
       }
 
@@ -65,6 +65,25 @@ class QuestionController {
       next(error);
     }
   };
+
+
+  // FETCH PUBLIC QUESTIONS BY ROOM
+  fetchPublicQuestionsByRoom = async (req, res, next) => {
+    try {
+      const { roomId } = req.params;
+      const questions = await QuestionService.getPublicQuestionsByRoom(roomId);
+
+      return res.status(200).json({
+        success: true,
+        message: "Public questions fetched for room",
+        questions
+      });
+
+    } catch (error) {
+      next(error);
+    }
+  };
+
 
 
   // FETCH PRIVATE QUESTIONS (created by user)

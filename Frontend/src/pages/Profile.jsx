@@ -287,65 +287,134 @@ export default function ProfilePage() {
   const [toast, setToast]   = useState(false);
 
   const navigate=useNavigate();
-const {user}=useAuth();
-// if(!user){
-//   navigate("/login");
-// }
-
-
+  const {user, setUser}=useAuth();
 
   const [profile, setProfile] = useState({
-   Name:      "",
+    Name:      "",
     handle:  "",
     email:    "",
-    company:   "TechCorp India",
-    location:  "Bangalore, India",
-    bio:       "Senior engineer & technical interviewer. Building CodeBridge to make hiring easier.",
+    company:   "",
+    location:  "",
+    bio:       "",
+    avatar:    "",
+    role:      "",
   });
-useEffect(()=>{
-  if(user){
-    setProfile(p => ({
-      ...p,
-      Name: user?.name,
-      handle: user?.name,
-      email: user?.email
-    }));
-  }
-},[user]);
 
+  const [rooms, setRooms] = useState([]);
+
+  useEffect(() => {
+    const fetchRooms = async () => {
+      try {
+        const res = await api("get", "room/user/all");
+        setRooms(res.data.rooms || []);
+      } catch (err) {
+        console.error("Failed to fetch rooms:", err);
+      }
+    };
+    fetchRooms();
+  }, []);
+
+  useEffect(()=>{
+    if(user){
+      setProfile({
+        Name: user.name || "",
+        handle: user.name || "",
+        email: user.email || "",
+        company: user.company || "",
+        location: user.location || "",
+        bio: user.bio || "",
+        avatar: user.avatar || "",
+        role: user.role || "interviewer",
+      });
+    }
+  },[user]);
 
   const [draft, setDraft] = useState({ ...profile });
-useEffect(()=>{
-  setDraft(profile);
-},[profile]);
-const initials = profile.Name
-  ? profile.Name.split(" ").map(n => n[0]).join("")
-  : "";
+  useEffect(()=>{
+    setDraft(profile);
+  },[profile]);
 
-  const saveProfile = () => {
-    setProfile({ ...draft });
-    setEditing(false);
-    setToast(true);
-    setTimeout(() => setToast(false), 2500);
+  const initials = profile.Name
+    ? profile.Name.split(" ").map(n => n[0]).join("")
+    : "";
+
+  const saveProfile = async () => {
+    try {
+      const res = await api("put", "auth/profile", {
+        name: draft.Name,
+        handle: draft.handle,
+        email: draft.email,
+        company: draft.company,
+        location: draft.location,
+        bio: draft.bio,
+        avatar: draft.avatar,
+        role: draft.role
+      });
+      if (res.data.success) {
+        setUser(res.data.user);
+        setEditing(false);
+        setToast(true);
+        setTimeout(() => setToast(false), 2500);
+      }
+    } catch (err) {
+      console.error("Failed to save profile:", err);
+      alert("Error saving profile");
+    }
+  };
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image must be smaller than 2MB");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setDraft(d => ({ ...d, avatar: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const upd = (k, v) => setDraft(d => ({ ...d, [k]: v }));
 
-  const totalSessions = SESSIONS.length;
-  const passed        = SESSIONS.filter(s => s.verdict === "pass").length;
-  const passRate      = Math.round((passed / totalSessions) * 100);
+  const totalSessions = rooms.length;
+  
+  // Calculate unique solved questions details - handle both populated and raw ObjectId
+  const solvedQuestionsMap = {};
+  rooms.forEach(room => {
+    room.submissions?.forEach(sub => {
+      if (sub.verdict === "AC" && sub.question) {
+        const qId = (sub.question._id || sub.question).toString();
+        const qTitle = sub.question.title || null; // null if not populated
+        // Only add if we have a title (populated) or it doesn't already exist
+        if (!solvedQuestionsMap[qId] || qTitle) {
+          solvedQuestionsMap[qId] = {
+            id: qId,
+            title: qTitle || solvedQuestionsMap[qId]?.title || "Unknown Question",
+            language: sub.language || "C++"
+          };
+        }
+      }
+    });
+  });
+  const solvedQuestionsList = Object.values(solvedQuestionsMap).filter(q => q.title);
+  const totalSolvedQuestionsCount = solvedQuestionsList.length;
+
+  const passRate = totalSessions > 0 ? Math.round((totalSolvedQuestionsCount / totalSessions) * 100) : 0;
 
   return (
     <>
       <style>{css}</style>
 
       {/* TOPBAR */}
-      <div className="topbar">
-        <div className="logo">Code<span>Bridge</span></div>
+      <div className="topbar" style={{ cursor:"pointer" }} >
+        <div onClick={() => navigate("/")} className="logo">Code<span>Bridge</span></div>
         <div className="sep" />
-        <div className="breadcrumb">Dashboard <span>›</span> <b>Profile</b></div>
+        {/* <div  className="breadcrumb">Dashboard <span>›</span> <b>Profile</b></div> */}
         <div className="spacer" />
-        <button className="back-btn">← Dashboard</button>
+        {/* <button className="back-btn" onClick={() => navigate("/dashboard")}>← Dashboard</button> */}
       </div>
 
       {/* HERO BANNER */}
@@ -359,8 +428,19 @@ const initials = profile.Name
       <div style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
         <div className="profile-header">
           <div className="avatar-wrap">
-            <div className="avatar">
-              {initials}
+            <input
+              type="file"
+              id="avatar-upload-input"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handlePhotoUpload}
+            />
+            <div className="avatar" onClick={() => document.getElementById("avatar-upload-input").click()}>
+              {profile.avatar ? (
+                <img src={profile.avatar} className="avatar-img" alt="avatar" />
+              ) : (
+                initials
+              )}
               <div className="avatar-overlay">📷 Change</div>
             </div>
             <div className="online-ring" />
@@ -386,8 +466,7 @@ const initials = profile.Name
         {/* TABS */}
         <div className="tabs-bar">
           {[
-            { id: "overview",  label: "Overview" },
-            { id: "sessions",  label: "Sessions",  count: totalSessions },
+            { id: "overview",  label: "Overview",  count: totalSessions },
             { id: "edit",      label: "Edit Profile" },
             { id: "security",  label: "Security" },
           ].map(t => (
@@ -408,15 +487,15 @@ const initials = profile.Name
         <div className="main">
           <div>
             {/* Stats */}
-            <div className="card" style={{ marginBottom: 20 }}>
+             <div className="card" style={{ marginBottom: 20 }}>
               <div className="stats-grid">
                 <div className="stat-cell">
                   <div className="stat-num" style={{ color: "var(--green)" }}>{totalSessions}</div>
                   <div className="stat-lbl">Sessions</div>
                 </div>
                 <div className="stat-cell">
-                  <div className="stat-num" style={{ color: "var(--cyan)" }}>{passed}</div>
-                  <div className="stat-lbl">Passed</div>
+                  <div className="stat-num" style={{ color: "var(--cyan)" }}>{totalSolvedQuestionsCount}</div>
+                  <div className="stat-lbl">Questions Solved</div>
                 </div>
                 <div className="stat-cell">
                   <div className="stat-num" style={{ color: "var(--amber)" }}>{passRate}%</div>
@@ -425,30 +504,74 @@ const initials = profile.Name
               </div>
             </div>
 
-            {/* Activity heatmap */}
-            <div className="card">
+            {/* Solved Questions Stats Card */}
+            <div className="card" style={{ marginBottom: 20 }}>
               <div className="card-header">
-                <span className="card-title">// activity — last 12 months</span>
+                <span className="card-title">// solved questions</span>
               </div>
               <div className="card-body">
-                <div className="heatmap-wrap">
-                  <div className="heatmap">
-                    {heatmapData.map((week, wi) => (
-                      <div className="heatmap-col" key={wi}>
-                        {week.map((val, di) => (
-                          <div key={di} className={`hm-cell hm-${val}`} title={`${val} session${val !== 1 ? "s" : ""}`} />
-                        ))}
+                {solvedQuestionsList.length === 0 ? (
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", padding: "10px 0" }}>No questions solved yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {solvedQuestionsList.map((q, idx) => (
+                      <div key={q.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: idx === solvedQuestionsList.length - 1 ? "none" : "1px solid var(--border)", paddingBottom: "10px", marginBottom: "10px" }}>
+                        <span style={{ fontSize: "0.875rem", fontWeight: 700 }}>{q.title}</span>
+                        <span className="skill-tag" style={{ margin: 0, padding: "3px 8px", fontSize: "0.65rem", color: "var(--green)", borderColor: "var(--green)", background: "var(--green-dim)" }}>
+                          {q.language}
+                        </span>
                       </div>
                     ))}
                   </div>
-                  <div className="heatmap-legend">
-                    <span className="hm-legend-label">Less</span>
-                    {[0,1,2,3,4].map(v => <div key={v} className={`hm-cell hm-${v}`} />)}
-                    <span className="hm-legend-label">More</span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
+
+
+
+            {/* All sessions list merged here */}
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <span className="card-title">// all sessions</span>
+                <span className="card-action">Export CSV</span>
+              </div>
+              <div className="card-body" style={{ padding: "0 20px" }}>
+                {rooms.length === 0 ? (
+                  <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>No sessions yet.</div>
+                ) : rooms.map((room) => {
+                  const isInterviewer = (room.interviewer?._id || room.interviewer)?.toString() === user?._id?.toString();
+                  const otherUser = isInterviewer ? room.candidate : room.interviewer;
+                  const name = otherUser?.name || (isInterviewer ? "Waiting for candidate..." : "Interviewer");
+                  // Use populated questions array first, fall back to currentQuestion
+                  const firstQuestion = room.questions?.[0];
+                  const problem = firstQuestion?.title || room.currentQuestion?.title || "No question selected";
+                  const verdict = room.status === "active" ? "pending" : (room.submissions?.some(s => s.verdict === "AC") ? "pass" : "fail");
+                  const formattedDate = new Date(room.createdAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit"
+                  });
+
+                  return (
+                    <div className="session-row" key={room._id} onClick={() => room.status === "active" && navigate(`/code/${room.roomID}`)} style={{ cursor: room.status === "active" ? "pointer" : "default" }}>
+                      <div className={`session-icon ${verdictIconBg[verdict]}`} style={{ fontSize: "1.1rem" }}>
+                        {verdictIcon[verdict]}
+                      </div>
+                      <div className="session-info">
+                        <div className="session-name">{name}</div>
+                        <div className="session-meta">
+                          <span>📋 {problem}</span>
+                          <span>🗓 {formattedDate}</span>
+                        </div>
+                      </div>
+                      <span className={`verdict-pill vp-${verdict}`}>{verdict}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
 
           {/* RIGHT SIDEBAR */}
@@ -456,68 +579,20 @@ const initials = profile.Name
             <div className="sidebar-card">
               <div className="sc-header"><div className="sc-title">// info</div></div>
               <div className="sc-body">
-                <div className="info-row"><div className="info-icon">🏢</div><div className="info-text"><b>{profile.company}</b></div></div>
+                {/* <div className="info-row"><div className="info-icon">🏢</div><div className="info-text"><b>{profile.company}</b></div></div>
                 <div className="info-row"><div className="info-icon">📍</div><div className="info-text">{profile.location}</div></div>
-                <div className="info-row"><div className="info-icon">✉️</div><div className="info-text">{profile.email}</div></div>
-                <div className="info-row"><div className="info-icon">🎙️</div><div className="info-text">Role: <b>{profile.role}</b></div></div>
+                <div className="info-row"><div className="info-icon">✉️</div><div className="info-text">{profile.email}</div></div> */}
+               
               </div>
             </div>
 
             <div className="sidebar-card">
               <div className="sc-header"><div className="sc-title">// skills</div></div>
               <div className="sc-body">
-                <div className="skill-tags">
+                {/* <div className="skill-tags">
                   {SKILLS.map(s => <span className="skill-tag" key={s}>{s}</span>)}
-                </div>
+                </div> */}
               </div>
-            </div>
-
-            <div className="sidebar-card">
-              <div className="sc-header"><div className="sc-title">// recent sessions</div></div>
-              <div className="sc-body" style={{ padding: "0 18px" }}>
-                {SESSIONS.slice(0, 3).map((s, i) => (
-                  <div className="session-row" key={i}>
-                    <div className={`session-icon ${verdictIconBg[s.verdict]}`}>
-                      {verdictIcon[s.verdict]}
-                    </div>
-                    <div className="session-info">
-                      <div className="session-name" style={{ fontSize: "0.8rem" }}>{s.name}</div>
-                      <div className="session-meta"><span>{s.problem}</span></div>
-                    </div>
-                    <span className={`verdict-pill vp-${s.verdict}`}>{s.verdict}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── SESSIONS TAB ── */}
-      {tab === "sessions" && (
-        <div className="main" style={{ gridTemplateColumns: "1fr" }}>
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">// all sessions</span>
-              <span className="card-action">Export CSV</span>
-            </div>
-            <div className="card-body" style={{ padding: "0 20px" }}>
-              {SESSIONS.map((s, i) => (
-                <div className="session-row" key={i}>
-                  <div className={`session-icon ${verdictIconBg[s.verdict]}`} style={{ fontSize: "1.1rem" }}>
-                    {verdictIcon[s.verdict]}
-                  </div>
-                  <div className="session-info">
-                    <div className="session-name">{s.name}</div>
-                    <div className="session-meta">
-                      <span>📋 {s.problem}</span>
-                      <span>⏱ {s.dur}</span>
-                      <span>🗓 {s.date}</span>
-                    </div>
-                  </div>
-                  <span className={`verdict-pill vp-${s.verdict}`}>{s.verdict}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -579,9 +654,15 @@ const initials = profile.Name
             <div className="sidebar-card">
               <div className="sc-header"><div className="sc-title">// profile photo</div></div>
               <div className="sc-body" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, paddingTop:24, paddingBottom:24 }}>
-                <div className="avatar" style={{ width:80, height:80, fontSize:"1.8rem", cursor:"default" }}>{initials}</div>
+                <div className="avatar" style={{ width:80, height:80, fontSize:"1.8rem", cursor:"pointer" }} onClick={() => document.getElementById("avatar-upload-input").click()}>
+                  {draft.avatar ? (
+                    <img src={draft.avatar} className="avatar-img" alt="avatar" />
+                  ) : (
+                    initials
+                  )}
+                </div>
                 <div style={{ textAlign:"center" }}>
-                  <button style={{ padding:"8px 18px", background:"var(--surface3)", border:"1px solid var(--border)", color:"var(--text)", borderRadius:7, cursor:"pointer", fontWeight:700, fontSize:"0.8rem", fontFamily:"'Syne',sans-serif", marginBottom:8, display:"block", width:"100%" }}>⬆ Upload Photo</button>
+                  <button onClick={() => document.getElementById("avatar-upload-input").click()} style={{ padding:"8px 18px", background:"var(--surface3)", border:"1px solid var(--border)", color:"var(--text)", borderRadius:7, cursor:"pointer", fontWeight:700, fontSize:"0.8rem", fontFamily:"'Syne',sans-serif", marginBottom:8, display:"block", width:"100%" }}>⬆ Upload Photo</button>
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.65rem", color:"var(--text-muted)", lineHeight:1.5 }}>JPG, PNG or GIF<br/>Max 2MB</div>
                 </div>
               </div>
@@ -621,8 +702,7 @@ const initials = profile.Name
               <div className="card-header"><span className="card-title">// active sessions</span></div>
               <div className="card-body" style={{ padding:"0 20px" }}>
                 {[
-                  { device:"Chrome on macOS", loc:"Bangalore, IN", time:"Now (current)", current:true },
-                  { device:"Firefox on Windows", loc:"Mumbai, IN",    time:"2 days ago",   current:false },
+                  
                 ].map((s, i) => (
                   <div className="session-row" key={i}>
                     <div className="session-icon" style={{ background:"var(--surface2)", fontSize:"1.1rem" }}>💻</div>
@@ -639,35 +719,17 @@ const initials = profile.Name
               </div>
             </div>
 
-            <div className="card danger-zone">
-              <div className="card-header"><span className="card-title">// danger zone</span></div>
-              <div className="card-body" style={{ padding:"0 20px" }}>
-                <div className="danger-row">
-                  <div>
-                    <div className="danger-label">Export All Data</div>
-                    <div className="danger-sub">Download all your sessions and profile data as JSON.</div>
-                  </div>
-                  <button className="danger-btn danger-btn-mild">Export</button>
-                </div>
-                <div className="danger-row">
-                  <div>
-                    <div className="danger-label">Delete Account</div>
-                    <div className="danger-sub">Permanently delete your account and all session data.</div>
-                  </div>
-                  <button className="danger-btn danger-btn-hard">Delete Account</button>
-                </div>
-              </div>
-            </div>
+         
           </div>
 
           <div>
             <div className="sidebar-card">
               <div className="sc-header"><div className="sc-title">// account info</div></div>
               <div className="sc-body">
-                <div className="info-row"><div className="info-icon">🔐</div><div className="info-text">Auth: <b>JWT</b></div></div>
+                
                 <div className="info-row"><div className="info-icon">📅</div><div className="info-text">Joined: <b>Jan 2025</b></div></div>
                 <div className="info-row"><div className="info-icon">✅</div><div className="info-text">Email: <b>Verified</b></div></div>
-                <div className="info-row"><div className="info-icon">🎙️</div><div className="info-text">Role: <b>{profile.role}</b></div></div>
+
               </div>
             </div>
           </div>

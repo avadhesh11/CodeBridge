@@ -28,8 +28,16 @@ createdAt: { type: Date, default: Date.now },
         type:mongoose.Schema.Types.ObjectId,
         ref:"User"
       },
+      question:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Question"
+      },
       verdict:String,
       code:String,
+      language:{
+        type:String,
+        default:"C++"
+      },
       createdAt:{
         type:Date,
         default:Date.now

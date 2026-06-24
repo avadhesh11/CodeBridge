@@ -44,7 +44,12 @@ export default function registerRoom(io, socket) {
 
       if (!room) return socket.emit("error-message", "Room does not exist");
 
+      if (room.status === "closed") {
+        return socket.emit("error-message", "This room has expired");
+      }
+
       const isInterviewer = room.interviewer.toString() === userId;
+
       const isExistingCandidate = room.candidate?.toString() === userId;
       const isNewCandidate = !room.candidate && !isInterviewer;
 
@@ -171,26 +176,95 @@ export default function registerRoom(io, socket) {
       socket.emit("error-message", "Something went wrong");
     }
   });
+  socket.on("candidate-left-fullscreen", async () => {
+  const roomID = socket.roomID;
+  if (!roomID) return;
+  socket.to(roomID).emit("candidate-left-fullscreen-alert");
+});
+
+socket.on("interviewer-warn-candidate", async () => {
+  const roomID =  socket.roomID;
+  if (!roomID) return;
+  socket.to(roomID).emit("candidate-warning");
+});
+
+socket.on("end-session", async () => {
+  try {
+    const roomID = socket.roomID;
+    if (!roomID) return;
+
+    const room = await roommodel.findOne({ roomID });
+    if (!room) return;
+
+    if (room.interviewer.toString() === socket.user.id) {
+      room.status = "closed";
+      // Archive currentQuestion into questions array if not already there
+      if (room.currentQuestion) {
+        const qIdStr = room.currentQuestion.toString();
+        const alreadyIn = room.questions.some(q => q.toString() === qIdStr);
+        if (!alreadyIn) {
+          room.questions.push(room.currentQuestion);
+        }
+      }
+      await room.save();
+      io.to(roomID).emit("session-ended");
+    }
+  } catch (error) {
+    console.error(error);
+  }
+});
 
   socket.on("disconnect", async () => {
     if (!socket.roomID) return;
 
-    if (roomSockets[socket.roomID]) {
-      roomSockets[socket.roomID] = roomSockets[socket.roomID].filter(id => id !== socket.id);
-      if (roomSockets[socket.roomID].length === 0) delete roomSockets[socket.roomID];
+    const roomID = socket.roomID;
+    const role = socket.role;
+
+    if (roomSockets[roomID]) {
+      roomSockets[roomID] = roomSockets[roomID].filter(id => id !== socket.id);
+      if (roomSockets[roomID].length === 0) delete roomSockets[roomID];
     }
 
-    const room = await roommodel.findOne({ roomID: socket.roomID });
+    const room = await roommodel.findOne({ roomID });
     if (!room) return;
 
-    if (socket.role === "candidate") {
-      room.candidate = null;
-      await room.save();
-    }
 
-    if (socket.role === "interviewer") {
-      room.status = "closed";
-      await room.save();
+
+    if (role === "interviewer") {
+      // Wait for 5 seconds to see if the interviewer reconnects before closing the room
+      setTimeout(async () => {
+        let hasInterviewer = false;
+        if (roomSockets[roomID]) {
+          for (const sid of roomSockets[roomID]) {
+            const s = io.sockets.sockets.get(sid);
+            if (s && s.role === "interviewer") {
+              hasInterviewer = true;
+              break;
+            }
+          }
+        }
+        
+        if (!hasInterviewer) {
+          try {
+            const r = await roommodel.findOne({ roomID });
+            if (r && r.status === "active") {
+              r.status = "closed";
+              // Archive currentQuestion into questions array if not already there
+              if (r.currentQuestion) {
+                const qIdStr = r.currentQuestion.toString();
+                const alreadyIn = r.questions.some(q => q.toString() === qIdStr);
+                if (!alreadyIn) {
+                  r.questions.push(r.currentQuestion);
+                }
+              }
+              await r.save();
+              io.to(roomID).emit("session-ended");
+            }
+          } catch (e) {
+            console.error("Error closing room on interviewer disconnect:", e);
+          }
+        }
+      }, 5000);
     }
   });
 }
