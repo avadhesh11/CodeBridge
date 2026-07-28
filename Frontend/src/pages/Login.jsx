@@ -224,7 +224,7 @@ try {
                 <div className="divider">
                   <div className="divider-line"/><div className="divider-text">or</div><div className="divider-line"/>
                 </div>
-                <button className="btn-github">⌘ Continue with GitHub</button>
+                <button onClick={() => { window.location.href = `${import.meta.env.VITE_BACKEND_URL}/api/auth/github`; }} className="btn-github">⌘ Continue with GitHub</button>
               </>
             ) : (
               <>

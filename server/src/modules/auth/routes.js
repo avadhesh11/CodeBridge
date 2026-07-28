@@ -5,6 +5,8 @@ import jwt from "jsonwebtoken";
 const router=express.Router();
 router.post("/login",authController.login);
 router.post("/signup",authController.signup);
+router.get("/github", authController.githubRedirect);
+router.get("/github/callback", authController.githubCallback);
 
 function generateAccessToken(user) {
   return jwt.sign(

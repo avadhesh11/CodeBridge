@@ -91,13 +91,43 @@ const styles = `
   .perm-banner { background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); border-radius: 6px; padding: 8px 12px; margin: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--red); text-align: center; }
 `;
 
-const defaultCode = `#include <bits/stdc++.h>
+const languageTemplates = {
+  "C++": `#include <bits/stdc++.h>
 using namespace std;
 
 int main() {
     // All the best
     return 0;
-}`;
+}`,
+  "Python": `def main():
+    # All the best
+    pass
+
+if __name__ == '__main__':
+    main()`,
+  "Java": `import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        // All the best
+    }
+}`,
+  "JavaScript": `// All the best
+function main() {
+    
+}
+
+main();`
+};
+
+const monacoLangMap = {
+  "C++": "cpp",
+  "Python": "python",
+  "Java": "java",
+  "JavaScript": "javascript"
+};
+
+const defaultCode = languageTemplates["C++"];
 
 const pcConfig = {
   iceServers: [
@@ -123,6 +153,7 @@ export default function InterviewPage() {
   const remoteDescSetRef = useRef(false);
 
   const [code, setCode] = useState(defaultCode);
+  const [language, setLanguage] = useState("C++");
   const [outputTab, setOutputTab] = useState("testcases");
   const [activeTab, setActiveTab] = useState("problem");
   const [micMuted, setMicMuted] = useState(false);
@@ -223,21 +254,24 @@ const fullscreenLockRef = useRef(false);
   };
 
 useEffect(() => {
- if (!questions || !code) return;
+  if (!questions || !code) return;
 
   const timeout = setTimeout(() => {
-    localStorage.setItem(questions._id, code);
+    localStorage.setItem(`${questions._id}_${language}`, code);
   }, 300);
 
   return () => clearTimeout(timeout);
-}, [code, questions]); 
+}, [code, questions, language]);
+
 useEffect(() => {
   if (questions) {
-    const saved = localStorage.getItem(questions._id);
+    const saved = localStorage.getItem(`${questions._id}_${language}`);
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (saved) setCode(saved);
-    else setCode(defaultCode);
+    else setCode(languageTemplates[language]);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }
-}, [questions]);
+}, [questions, language]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -327,6 +361,9 @@ useEffect(() => {
 
     socket.on("joined-successfully", (data) => {
       setRole(data.role);
+      if (data.currentLanguage) {
+        setLanguage(data.currentLanguage);
+      }
     });
 
     socket.on("error-message", (msg) => {
@@ -410,26 +447,28 @@ useEffect(() => {
     socket.on("screen-share-start", () => setScreenShared(true));
     socket.on("screen-share-stop", () => setScreenShared(false));
     socket.on("code-update", ({ code }) => {
-      setCode(code)
+      setCode(code);
       if (questions) {
-    localStorage.setItem(questions._id, code); 
-  }
-  });
+        localStorage.setItem(`${questions._id}_${language}`, code); 
+      }
+    });
+    socket.on("language-update", ({ language: newLang }) => {
+      setLanguage(newLang);
+    });
     socket.on("question-selected", ({ question }) => {
-  setQuestions(question);
- 
+      setQuestions(question);
     });
     
     socket.on("candidate-left-fullscreen-alert", () => {
-  if (role === "interviewer") setInterviewerDecisionPopup(true);
-});
+      if (role === "interviewer") setInterviewerDecisionPopup(true);
+    });
 
-socket.on("candidate-warning", () => {
-  if (role === "candidate") {
-    setWarningMessage("⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.");
-    setTimeout(() => setWarningMessage(""), 5000);
-  }
-});
+    socket.on("candidate-warning", () => {
+      if (role === "candidate") {
+        setWarningMessage("⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.");
+        setTimeout(() => setWarningMessage(""), 5000);
+      }
+    });
 
     socket.on("session-ended", () => {
       alert("The interview session has been ended.");
@@ -437,7 +476,7 @@ socket.on("candidate-warning", () => {
     });
 
     return () => {
-      ["joined-successfully", "error-message", "code-update","candidate-left-fullscreen-alert","candidate-warning", "question-selected",
+      ["joined-successfully", "error-message", "code-update", "language-update", "candidate-left-fullscreen-alert", "candidate-warning", "question-selected",
         "chat", "chat-history", "webrtc-offer", "webrtc-answer", "webrtc-ice",
         "start-call", "screen-share-start", "screen-share-stop", "session-ended"
       ].forEach(e => socket.off(e));
@@ -488,12 +527,21 @@ socket.on("candidate-warning", () => {
   };
 
 
+  const handleLanguageChange = (newLang) => {
+    if (role === "interviewer") return;
+    setLanguage(newLang);
+    const templateCode = languageTemplates[newLang];
+    setCode(templateCode);
+    socket.emit("language-change", { language: newLang });
+    socket.emit("code-change", { code: templateCode });
+  };
+
   const handleRun = async () => {
     if (!questions) return;
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
-      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "sample", language: "C++" });
+      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "sample", language });
       const { verdict, results, error } = res.data;
       if (verdict === "CE") return setVerdict({ status: "error", output: "Compile error", error });
       if (verdict === "RE") return setVerdict({ status: "error", output: "Runtime error", error });
@@ -517,7 +565,7 @@ socket.on("candidate-warning", () => {
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
-      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "hidden", language: "C++" });
+      const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "hidden", language });
       const { verdict, error } = res.data;
       if (verdict === "CE") return setVerdict({ status: "error", error });
       if (verdict === "AC") {
@@ -665,7 +713,18 @@ socket.on("candidate-warning", () => {
 
         <div className="editor-panel">
           <div className="editor-topbar">
-            <span className="lang-tag">C++</span>
+            <select
+              className="lang-tag"
+              style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)", padding: "3px 10px", borderRadius: "4px", cursor: role === "interviewer" ? "not-allowed" : "pointer" }}
+              disabled={role === "interviewer"}
+              value={language}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+            >
+              <option value="C++">C++</option>
+              <option value="Python">Python</option>
+              <option value="Java">Java</option>
+              <option value="JavaScript">JavaScript</option>
+            </select>
             <div className="users-row">
               <div className="user-avatar ua-green" title="Interviewer">IM</div>
               <div className="user-avatar ua-cyan" title="Candidate">CA</div>
@@ -682,7 +741,7 @@ socket.on("candidate-warning", () => {
             ) : (
               <Editor
                 height="100%"
-                defaultLanguage="cpp"
+                language={monacoLangMap[language] || "cpp"}
                 theme="vs-dark"
                 value={code}
                 onChange={(v) => {

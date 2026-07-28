@@ -70,8 +70,55 @@ const refreshToken = generateRefreshToken(user);
       },
       accessToken,
       refreshToken,
-};
-}
+    };
+  }
+
+  githubAuth = async (githubUser, email) => {
+    let user = await userModel.findOne({
+      $or: [
+        { githubId: githubUser.id.toString() },
+        { email }
+      ]
+    });
+
+    if (!user) {
+      user = await userModel.create({
+        name: githubUser.name || githubUser.login,
+        email,
+        githubId: githubUser.id.toString(),
+        avatar: githubUser.avatar_url || "",
+        role: "interviewer"
+      });
+    } else {
+      let changed = false;
+      if (!user.githubId) {
+        user.githubId = githubUser.id.toString();
+        changed = true;
+      }
+      if (!user.avatar && githubUser.avatar_url) {
+        user.avatar = githubUser.avatar_url;
+        changed = true;
+      }
+      if (changed) {
+        await user.save();
+      }
+    }
+
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+    user.currentRefreshToken = refreshToken;
+    await user.save();
+
+    return {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
+      accessToken,
+      refreshToken,
+    };
+  };
 };
 
 export default new authServices();

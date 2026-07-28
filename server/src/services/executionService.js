@@ -3,12 +3,40 @@ import path from "path";
 import { v4 as uuid } from "uuid";
 import { spawn } from "child_process";
 import pLimit from "p-limit";
+import { Worker } from "bullmq";
+import { connection } from "./queueService.js";
 
 const limit = pLimit(5);
 
+const configs = {
+  "C++": {
+    filename: "main.cpp",
+    image: "frolvlad/alpine-gxx:latest",
+    compileCmd: "g++ main.cpp -o main",
+    runCmd: "./main"
+  },
+  "Python": {
+    filename: "main.py",
+    image: "python:3.9-slim",
+    compileCmd: null,
+    runCmd: "python -B main.py"
+  },
+  "Java": {
+    filename: "Main.java",
+    image: "openjdk:17-jdk-slim",
+    compileCmd: "javac Main.java",
+    runCmd: "java Main"
+  },
+  "JavaScript": {
+    filename: "main.js",
+    image: "node:18-slim",
+    compileCmd: null,
+    runCmd: "node main.js"
+  }
+};
+
 // Convert Windows paths (E:\foo\bar) to Docker-compatible paths (/e/foo/bar)
 const toDockerPath = (p) => {
-  // On Windows: C:\foo\bar -> /c/foo/bar
   return p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
 };
 
@@ -45,47 +73,66 @@ const normalize = (str) =>
   str.trim().replace(/\s+/g, " ");
 
 // ---------------- COMPILE ----------------
-const compileCode = async (tempDir, timelimit) => {
-  const dockerDir = toDockerPath(tempDir);
-  return runDocker([
+const compileCode = async (tempDir, langConfig) => {
+  if (!langConfig.compileCmd) return { code: 0 };
+  
+  const tempId = path.basename(tempDir);
+  const volumeName = process.env.TEMP_VOLUME_NAME;
+  
+  const dockerArgs = [
     "run",
-    "--rm",
-    "-v",
-    `${dockerDir}:/app`,
-    "-w",
-    "/app",
-    "gcc:latest",
+    "--rm"
+  ];
+  
+  if (volumeName) {
+    dockerArgs.push("-v", `${volumeName}:/app`, "-w", `/app/${tempId}`);
+  } else {
+    const dockerDir = toDockerPath(tempDir);
+    dockerArgs.push("-v", `${dockerDir}:/app`, "-w", "/app");
+  }
+  
+  dockerArgs.push(
+    langConfig.image,
     "sh",
     "-c",
-    `g++ main.cpp -o main`
-  ]);
+    langConfig.compileCmd
+  );
+  
+  return runDocker(dockerArgs);
 };
 
-const runSingleTest = async (tc, dockerPath, timelimit) => {
-  const dockerDir = toDockerPath(dockerPath);
-  const result = await runDocker(
-    [
-      "run",
-      "--rm",
-      "--memory=256m",
-      "--cpus=1",
-      "--pids-limit=64",
-      "--network=none",
-      "--read-only",
-      "--tmpfs",
-      "/tmp",
-      "-i",
-      "-v",
-      `${dockerDir}:/app`,
-      "-w",
-      "/app",
-      "gcc:latest",
-      "sh",
-      "-c",
-      `timeout ${timelimit}s ./main`
-    ],
-    tc.input
+const runSingleTest = async (tc, dockerPath, langConfig, timelimit) => {
+  const tempId = path.basename(dockerPath);
+  const volumeName = process.env.TEMP_VOLUME_NAME;
+  
+  const dockerArgs = [
+    "run",
+    "--rm",
+    "--memory=256m",
+    "--cpus=1",
+    "--pids-limit=64",
+    "--network=none",
+    "--read-only",
+    "--tmpfs",
+    "/tmp",
+    "-i"
+  ];
+
+  if (volumeName) {
+    dockerArgs.push("-v", `${volumeName}:/app`, "-w", `/app/${tempId}`);
+  } else {
+    const dockerDir = toDockerPath(dockerPath);
+    dockerArgs.push("-v", `${dockerDir}:/app`, "-w", "/app");
+  }
+
+  dockerArgs.push(
+    langConfig.image,
+    "sh",
+    "-c",
+    `timeout ${timelimit}s ${langConfig.runCmd}`
   );
+
+  const result = await runDocker(dockerArgs, tc.input);
 
   // ⏱️ Timeout
   if (result.code === 124) {
@@ -115,9 +162,9 @@ const runSingleTest = async (tc, dockerPath, timelimit) => {
 };
 
 // ---------------- PARALLEL EVALUATION ----------------
-const evaluateParallel = async (testcases, dockerPath, timelimit) => {
+const evaluateParallel = async (testcases, dockerPath, langConfig, timelimit) => {
   const promises = testcases.map((tc) =>
-    limit(() => runSingleTest(tc, dockerPath, timelimit))
+    limit(() => runSingleTest(tc, dockerPath, langConfig, timelimit))
   );
 
   const results = await Promise.all(promises);
@@ -137,18 +184,19 @@ const evaluateParallel = async (testcases, dockerPath, timelimit) => {
 };
 
 // ---------------- MAIN JUDGE ----------------
-const runJudge = async (testcases, code, timelimit = 2) => {
+const runJudge = async (testcases, code, language = "C++", timelimit = 2) => {
+  const langConfig = configs[language] || configs["C++"];
   const tempId = uuid();
   const tempDir = path.join(process.cwd(), "temp", tempId);
 
   await fs.mkdir(tempDir, { recursive: true });
 
-  const filePath = path.join(tempDir, "main.cpp");
+  const filePath = path.join(tempDir, langConfig.filename);
   await fs.writeFile(filePath, code);
 
   try {
     // 🔨 Compile
-    const compileResult = await compileCode(tempDir, timelimit);
+    const compileResult = await compileCode(tempDir, langConfig);
 
     if (compileResult.code !== 0) {
       return {
@@ -158,7 +206,7 @@ const runJudge = async (testcases, code, timelimit = 2) => {
     }
 
     // ⚡ Parallel Execution
-    return await evaluateParallel(testcases, tempDir, timelimit);
+    return await evaluateParallel(testcases, tempDir, langConfig, timelimit);
 
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -166,16 +214,42 @@ const runJudge = async (testcases, code, timelimit = 2) => {
 };
 
 // ---------------- EXPORTS ----------------
-export const runSample = async ({ testcases, timelimit }, code) => {
+export const runSample = async ({ testcases, timelimit }, code, language = "C++") => {
   if (!code || code.length > 50000) {
     return { verdict: "ERROR", error: "Invalid or too large code" };
   }
-  return runJudge(testcases, code, timelimit);
+  return runJudge(testcases, code, language, timelimit);
 };
 
-export const runHidden = async ({ testcases, timelimit }, code) => {
+export const runHidden = async ({ testcases, timelimit }, code, language = "C++") => {
   if (!code || code.length > 50000) {
     return { verdict: "ERROR", error: "Invalid or too large code" };
   }
-  return runJudge(testcases, code, timelimit);
+  return runJudge(testcases, code, language, timelimit);
 };
+
+// ---------------- BULLMQ WORKER ----------------
+export const executionWorker = new Worker(
+  "executionQueue",
+  async (job) => {
+    const { testcases, code, language, timelimit } = job.data;
+    try {
+      return await runJudge(testcases, code, language, timelimit);
+    } catch (err) {
+      console.error("🔥 Worker execution crashed:", err);
+      throw err;
+    }
+  },
+  {
+    connection,
+    concurrency: 5
+  }
+);
+
+executionWorker.on("completed", (job) => {
+  console.log(`Job ${job.id} completed successfully`);
+});
+
+executionWorker.on("failed", (job, err) => {
+  console.error(`Job ${job.id} failed with error:`, err);
+});

@@ -1,7 +1,7 @@
 import roomModel from "../../models/room.js";
 import { nanoid } from "nanoid";
 import questionModel from "../../models/question.js";
-import { runSample, runHidden } from "../../services/executionService.js";
+import { executionQueue, queueEvents } from "../../services/queueService.js";
 
 // const question = {
 //   format:"multiple",
@@ -101,18 +101,19 @@ runCode = async (code, questionId, type = "sample", roomID = null, userId = null
   }
 
   try {
-    let result;
-    if (type === "sample") {
-      result = await runSample({
-        testcases: question.sampletcs,
-        timelimit: question.timelimit || 2
-      }, code);
-    } else {
-      result = await runHidden({
-        testcases: question.hiddentcs,
-        timelimit: question.timelimit || 2
-      }, code);
-    }
+    const testcases = type === "sample" ? question.sampletcs : question.hiddentcs;
+    const timelimit = question.timelimit || 2;
+
+    // Enqueue the execution job
+    const job = await executionQueue.add("execute", {
+      testcases,
+      code,
+      language: language || "C++",
+      timelimit
+    });
+
+    // Wait for worker to finish processing the job
+    const result = await job.waitUntilFinished(queueEvents);
 
     if (type === "hidden" && roomID && userId) {
       const room = await roomModel.findOne({ roomID });
@@ -131,7 +132,7 @@ runCode = async (code, questionId, type = "sample", roomID = null, userId = null
 
     return result;
   } catch (err) {
-    console.error("🔥 EXECUTION CRASH:", err);
+    console.error("🔥 EXECUTION CRASH/QUEUE ERROR:", err);
     return { verdict: "ERROR", error: err.message };
   }
 };

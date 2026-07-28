@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, },
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
+  password: { type: String },
+  githubId: { type: String, unique: true, sparse: true },
   currentRefreshToken: { type: String, default: null },
   bio: { type: String, default: "" },
   company: { type: String, default: "" },

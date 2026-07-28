@@ -92,7 +92,7 @@ export default function registerRoom(io, socket) {
         }
       }
 
-      socket.emit("joined-successfully", { role, roomID });
+      socket.emit("joined-successfully", { role, roomID, currentLanguage: room.currentLanguage || "C++" });
 
       const currentSockets = roomSockets[roomID];
       console.log(`Room ${roomID} now has ${currentSockets.length} socket(s):`, currentSockets);
@@ -112,6 +112,12 @@ export default function registerRoom(io, socket) {
     if (!socket.roomID) return;
     await roommodel.updateOne({ roomID: socket.roomID }, { $set: { currentCode: code } });
     socket.to(socket.roomID).emit("code-update", { code, sender: socket.user.id });
+  });
+
+  socket.on("language-change", async ({ language }) => {
+    if (!socket.roomID) return;
+    await roommodel.updateOne({ roomID: socket.roomID }, { $set: { currentLanguage: language } });
+    socket.to(socket.roomID).emit("language-update", { language, sender: socket.user.id });
   });
 
   socket.on("chat", async ({ message }) => {

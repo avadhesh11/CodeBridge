@@ -15,6 +15,7 @@ interviewer:{type:mongoose.Schema.Types.ObjectId,ref:"User",required:true},
 status:{ type: String, enum: ["active","closed"],default:"active"},
 activeSockets: [String], 
 currentCode: { type: String, default: "" },
+currentLanguage: { type: String, default: "C++" },
 createdAt: { type: Date, default: Date.now },
   settings:{
     videoEnabled:{type:Boolean,default:true},

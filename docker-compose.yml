@@ -5,16 +5,31 @@ services:
       - "5000:5000"
     environment:
       - FRONTEND_URL=http://localhost:3000
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URI=mongodb://127.0.0.1:27017/codebridge
+      - ACCESS_SECRET=codebridge
+      - REFRESH_SECRET=codebridge
+      - TEMP_VOLUME_NAME=codebridge_temp_data
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - BACKEND_URL=${BACKEND_URL:-http://localhost:5000}
     depends_on:
       - mongo
+      - redis
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - temp_data:/src/services/temp
 
   frontend:
-    build: ./Frontend
+    build:
+      context: ./Frontend
+      args:
+        - VITE_FRONTEND_URL=http://localhost:3000
+        - VITE_BACKEND_URL=http://localhost:5000
 
     ports:
       - "3000:80"
+
     depends_on:
       - backend
 
@@ -25,5 +40,12 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
 volumes:
   mongo_data:
+  temp_data:
+    name: codebridge_temp_data
