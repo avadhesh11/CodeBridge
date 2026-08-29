@@ -4,7 +4,7 @@ import { v4 as uuid } from "uuid";
 import { spawn } from "child_process";
 import pLimit from "p-limit";
 import { Worker } from "bullmq";
-import { connection } from "./queueService.js";
+import { connection, createRedisConnection } from "./queueService.js";
 
 const limit = pLimit(5);
 
@@ -348,7 +348,7 @@ export const executionWorker = new Worker(
     }
   },
   {
-    connection,
+    connection: createRedisConnection("worker"),
     concurrency: 5
   }
 );
