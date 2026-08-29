@@ -114,13 +114,18 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import { executionQueue } from "./services/queueService.js";
 
-const serverAdapter = new ExpressAdapter();
-serverAdapter.setBasePath("/admin/queues");
+// BullMQ Visual Dashboard (disabled by default in production)
+if (process.env.ENABLE_QUEUE_BOARD === "true") {
+  const serverAdapter = new ExpressAdapter();
+  serverAdapter.setBasePath("/admin/queues");
 
-createBullBoard({
-  queues: [new BullMQAdapter(executionQueue)],
-  serverAdapter: serverAdapter,
-});
+  createBullBoard({
+    queues: [new BullMQAdapter(executionQueue)],
+    serverAdapter: serverAdapter,
+  });
+
+  app.use("/admin/queues", serverAdapter.getRouter());
+}
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK" });
@@ -132,9 +137,6 @@ app.get("/api/me", authMiddleware, (req, res) => {
     user: req.user,
   });
 });
-
-// BullMQ Visual Dashboard
-app.use("/admin/queues", serverAdapter.getRouter());
 
 app.use("/api/auth",authRoutes);
 app.use("/api/room",roomRoutes);

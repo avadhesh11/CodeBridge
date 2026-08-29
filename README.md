@@ -7,11 +7,12 @@ CodeBridge is a production-ready, real-time technical interview platform that si
 ## 🚀 Key Features
 
 *   **👥 Real-Time Collaborative Editor**: Full-featured IDE powered by Monaco Editor. Synchronizes code, cursors, editor themes, and active programming languages (C++, Python, Java, and JavaScript) in real-time across participants.
+*   **🧑‍💻 Solo Practice Mode**: Dedicated standalone practice environment allowing candidates to solve algorithmic challenges independently without requiring an active interviewer room.
 *   **🎥 WebRTC Video/Audio & Screen Sharing**: Built-in peer-to-peer communication using `simple-peer` and Socket.io signaling. Conduct face-to-face evaluations and watch candidates share their screens without external meeting software.
-*   **🔒 Secure, Sandboxed Code Execution**: Run and submit code against customizable test suites. Compiles and executes code inside isolated, resource-bounded Docker containers with strict security constraints (disabled network access, 256MB memory cap, CPU limit, and a read-only filesystem).
+*   **🔒 Secure, Sandboxed Code Execution**: Run and submit code against customizable test suites. Features dual-mode execution: isolated, resource-bounded Docker containers (256MB RAM cap, CPU limit, disabled network, read-only FS) and native Linux compiler sandboxing with kernel signal timeout watchdogs.
 *   **🚨 Anti-Cheat & Proctoring Engine**: Monitors focus changes and page visibility. Automatically triggers visual warnings on the candidate's screen and notifies the interviewer in real-time if a candidate exits fullscreen or switches tabs.
 *   **💬 In-Room Chat**: Integrated messaging system allowing instant text communication during the session. Chat history is synchronized in real-time and persisted inside MongoDB.
-*   **📊 Room & Question Management**: Interviewer dashboard to create rooms, select custom problems, manage test cases (input/output), track live submission histories, and configure session parameters.
+*   **📊 Room & Question Management**: Interviewer dashboard to create rooms, select custom problems, import from a curated question bank, manage test cases (input/output), track live submission histories, and configure session parameters.
 
 ---
 
@@ -61,7 +62,7 @@ Make sure you have the following installed on your machine:
 
 ### Step 1: Clone the Repository
 ```bash
-git clone https://github.com/avadheshnagar11/CodeBridge.git
+git clone https://github.com/avadhesh11/CodeBridge.git
 cd CodeBridge
 ```
 
