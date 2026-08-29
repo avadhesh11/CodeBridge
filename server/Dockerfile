@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
-WORKDIR /src/services
+WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
@@ -24,5 +24,5 @@ COPY . .
 # Expose backend port
 EXPOSE 5000
 
-# Start server
-CMD ["npm", "start"]
+# Start server directly with node in production
+CMD ["node", "server.js"]
