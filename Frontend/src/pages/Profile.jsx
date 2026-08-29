@@ -287,7 +287,7 @@ export default function ProfilePage() {
   const [toast, setToast]   = useState(false);
 
   const navigate=useNavigate();
-  const {user, setUser}=useAuth();
+  const { user, setUser, logout } = useAuth();
 
   const [profile, setProfile] = useState({
     Name:      "",
@@ -409,12 +409,17 @@ export default function ProfilePage() {
       <style>{css}</style>
 
       {/* TOPBAR */}
-      <div className="topbar" style={{ cursor:"pointer" }} >
-        <div onClick={() => navigate("/")} className="logo">Code<span>Bridge</span></div>
+      <div className="topbar">
+        <div onClick={() => navigate("/")} className="logo" style={{ cursor: "pointer" }}>Code<span>Bridge</span></div>
         <div className="sep" />
-        {/* <div  className="breadcrumb">Dashboard <span>›</span> <b>Profile</b></div> */}
+        <div className="breadcrumb" style={{ cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
+          Dashboard <span>›</span> <b>Profile</b>
+        </div>
         <div className="spacer" />
-        {/* <button className="back-btn" onClick={() => navigate("/dashboard")}>← Dashboard</button> */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button className="back-btn" onClick={() => navigate("/dashboard")}>← Dashboard</button>
+          <button className="back-btn" onClick={logout} style={{ color: "var(--red)", borderColor: "rgba(248,81,73,0.3)" }}>Logout</button>
+        </div>
       </div>
 
       {/* HERO BANNER */}
@@ -454,12 +459,21 @@ export default function ProfilePage() {
               <div className="profile-handle">@{profile.handle}</div>
               <div className="profile-bio">{profile.bio}</div>
             </div>
-            <button
-              className={`edit-profile-btn ${editing ? "saving" : ""}`}
-              onClick={() => editing ? saveProfile() : setEditing(true)}
-            >
-              {editing ? "✓ Save Changes" : "✎ Edit Profile"}
-            </button>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <button
+                className={`edit-profile-btn ${editing ? "saving" : ""}`}
+                onClick={() => editing ? saveProfile() : setEditing(true)}
+              >
+                {editing ? "✓ Save Changes" : "✎ Edit Profile"}
+              </button>
+              <button
+                className="edit-profile-btn"
+                onClick={logout}
+                style={{ color: "var(--red)", borderColor: "rgba(248,81,73,0.3)" }}
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
 

@@ -171,7 +171,7 @@ const renderRoomQuestions = (room) => {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [activeNav, setActiveNav] = useState("Sessions");
   const [showModal, setShowModal] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -262,18 +262,57 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-          <div className="sidebar-user" onClick={() => navigate("/profile")} style={{ cursor: "pointer" }}>
-            <div className="user-ava">
-              {user?.avatar ? (
-                <img src={user.avatar} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} alt="avatar" />
-              ) : (
-                userInitials
-              )}
+
+          <div style={{ padding: "0 12px 12px" }}>
+            <div
+              className="nav-item"
+              onClick={logout}
+              style={{ color: "var(--red)", border: "1px solid rgba(248,81,73,0.25)", background: "rgba(248,81,73,0.05)" }}
+            >
+              <span className="nav-icon" style={{ fontSize: "1rem" }}>⎋</span>
+              Logout
             </div>
-            <div>
-              <div className="user-info-name">{user?.name || "User"}</div>
-              <div className="user-info-role">{user?.role || "user"}</div>
+          </div>
+
+          <div className="sidebar-user" onClick={() => navigate("/profile")} style={{ cursor: "pointer", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", overflow: "hidden" }}>
+              <div className="user-ava">
+                {user?.avatar ? (
+                  <img src={user.avatar} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} alt="avatar" />
+                ) : (
+                  userInitials
+                )}
+              </div>
+              <div style={{ overflow: "hidden" }}>
+                <div className="user-info-name" style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{user?.name || "User"}</div>
+                <div className="user-info-role">{user?.role || "user"}</div>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); logout(); }}
+              title="Sign Out"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                padding: "6px",
+                borderRadius: "6px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = "var(--red)"}
+              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-muted)"}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </button>
           </div>
         </div>
 

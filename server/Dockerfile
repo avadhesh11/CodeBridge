@@ -1,8 +1,13 @@
 # Use Node base image
 FROM node:20
 
-# Install g++ and docker CLI for C++ execution
-RUN apt-get update && apt-get install -y g++ docker.io
+# Install compilers and tools for C++, Python, Java, Docker CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    g++ \
+    python3 \
+    default-jdk-headless \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /src/services

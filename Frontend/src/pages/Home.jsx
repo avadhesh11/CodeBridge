@@ -154,6 +154,7 @@ const styles = `
 
 export default function HomePage({user}) {
   const navigate=useNavigate();
+  const { logout } = useAuth();
   const scrollref=useRef();
   const [typed, setTyped] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -209,11 +210,21 @@ const handleJoinRoom = () => {
     </button>
     </>
   )}
-            {!user ? ( <a href="/login" className="nav-cta">Get Started →</a>):
-            (
-              <a href="/profile" className="nav-cta" >Profile</a>
-            )
-            }
+            {!user ? (
+              <a href="/login" className="nav-cta">Get Started →</a>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <a href="/dashboard" className="nav-cta" style={{ background: "var(--surface2)", color: "var(--text)", border: "1px solid var(--border)" }}>Dashboard</a>
+                <a href="/profile" className="nav-cta">Profile</a>
+                <button
+                  onClick={logout}
+                  className="btn-secondary"
+                  style={{ padding: "8px 14px", fontSize: "0.8rem", color: "var(--red)", borderColor: "rgba(248,81,73,0.3)", cursor: "pointer" }}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
            
           </div>
         </nav>

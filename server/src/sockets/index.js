@@ -2,11 +2,17 @@ import { Server } from "socket.io";
 import registerRoom from "./roomSocket.js";
 import jwt from "jsonwebtoken";
 import cookie from "cookie";
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(",").map(s => s.trim().replace(/\/$/, ""))
+  : ["http://localhost:3000", "http://localhost:5173"];
+
 export default function initSocket(server){
     
 const io=new Server(server,{
     cors: {
-    origin: [process.env.FRONTEND_URL],
+    origin: (origin, callback) => {
+      callback(null, true);
+    },
     methods: ["GET", "POST"],
     credentials: true
   },

@@ -14,16 +14,27 @@ export const AuthProvider = ({ children }) => {
     } catch(error) {
       setUser(null);
       console.error(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
-// if(loading) return <LoadingScreen />
+
+  const logout = async () => {
+    try {
+      await api("post", "auth/logout");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+    setUser(null);
+    window.location.href = "/login";
+  };
+
   useEffect(() => {
     fetchUser();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading }}>
+    <AuthContext.Provider value={{ user, setUser, loading, logout, fetchUser }}>
       {children}
     </AuthContext.Provider>
   );

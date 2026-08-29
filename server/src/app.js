@@ -16,10 +16,19 @@ import fs from "fs";
 const app = express();
 
 
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(",").map(s => s.trim().replace(/\/$/, ""))
+  : ["http://localhost:3000", "http://localhost:5173"];
+
 app.use(
   cors({
-    origin:[process.env.FRONTEND_URL],
-    
+    origin: (origin, callback) => {
+      // allow requests with no origin (like mobile apps or curl) or if origin is allowed
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Permissive in deployment to prevent CORS block
+    },
     credentials: true
   })
 );

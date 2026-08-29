@@ -1,6 +1,7 @@
-import { useState,useEffect } from "react";
+import { useState, useEffect } from "react";
 import api from "../utils/api";
-import {useNavigate} from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/authContext";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -32,7 +33,7 @@ const styles = `
     width: 500px; height: 500px;
     background: radial-gradient(ellipse, rgba(57,211,83,0.08) 0%, transparent 65%);
   }
-  .auth-logo { position: relative; z-index: 1; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--green); }
+  .auth-logo { position: relative; z-index: 1; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--green); cursor: pointer; }
   .auth-logo span { color: var(--text-muted); }
   .auth-left-content { position: relative; z-index: 1; }
   .auth-left-title { font-size: 2.4rem; font-weight: 800; line-height: 1.15; letter-spacing: -1.5px; margin-bottom: 16px; }
@@ -55,32 +56,20 @@ const styles = `
   }
   .auth-form-wrap { width: 100%; max-width: 400px; }
   .auth-form-title { font-size: 2rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 6px; }
-  .auth-form-sub { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 40px; }
-  .auth-form-sub a { color: var(--green); text-decoration: none; }
-
-  /* ROLE SELECTOR */
-  .role-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
-  .role-btn {
-    padding: 14px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface); cursor: pointer; transition: all 0.2s; text-align: center;
-  }
-  .role-btn.active { border-color: var(--green); background: var(--green-dim); }
-  .role-btn-icon { font-size: 1.5rem; margin-bottom: 6px; }
-  .role-btn-label { font-size: 0.8rem; font-weight: 700; color: var(--text); }
-  .role-btn-desc { font-size: 0.7rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  .auth-form-sub { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 32px; }
+  .auth-form-sub a { color: var(--green); text-decoration: none; font-weight: 700; cursor: pointer; }
 
   /* FORM */
-  .form-group { margin-bottom: 18px; }
+  .form-group { margin-bottom: 18px; width: 100%; }
   .form-label { display: block; font-size: 0.8rem; font-weight: 700; margin-bottom: 7px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-family: 'JetBrains Mono', monospace; }
   .form-input {
     width: 100%; background: var(--surface); border: 1px solid var(--border);
     color: var(--text); padding: 12px 14px; border-radius: 7px;
     font-family: 'JetBrains Mono', monospace; font-size: 0.875rem;
-    transition: border-color 0.2s; outline: none;
+    transition: border-color 0.2s; outline: none; box-sizing: border-box;
   }
   .form-input:focus { border-color: var(--green); }
   .form-input::placeholder { color: var(--text-muted); }
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
   .divider { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
   .divider-line { flex: 1; height: 1px; background: var(--border); }
@@ -91,75 +80,78 @@ const styles = `
   .btn-github { width: 100%; padding: 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-weight: 700; font-size: 0.875rem; cursor: pointer; font-family: 'Syne', sans-serif; transition: border-color 0.2s; }
   .btn-github:hover { border-color: var(--text-muted); }
 
-  .tab-switch { display: flex; gap: 0; margin-bottom: 36px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .tab-switch { display: flex; gap: 0; margin-bottom: 32px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .tab-btn { flex: 1; padding: 11px; background: transparent; color: var(--text-muted); border: none; cursor: pointer; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.875rem; transition: all 0.2s; }
   .tab-btn.active { background: var(--green); color: #000; }
+  .auth-error { background: rgba(248,81,73,0.12); border: 1px solid rgba(248,81,73,0.3); border-radius: 6px; padding: 10px 14px; color: var(--red); font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; margin-bottom: 18px; }
 `;
 
 export default function AuthPage() {
   const [mode, setMode] = useState("login"); // login | signup
-  const [role, setRole] = useState("interviewer");
-  const [name,setName]=useState("");
-  const [email,setEmail]=useState("");
-  const [password,setPassword]=useState("");
-const navigate=useNavigate();
-const [user,setUser]=useState();
-const fetchUser = async () => {
-  try {
-    const res = await api("get","me");
-     setUser(res.data.user);
-  } catch (err) {
-    console.log(err);
-  }
-};
-useEffect(()=>{
-  fetchUser();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-},[]);
-if(user){
-  navigate("/");
-}
-const handleSignup=async()=>{
-try {
-  console.log(name);
-  console.log(email);
-  console.log(password);
-  if(!name || !email || !password){
-    alert("All fields are requried");
-    return;
-  }
-  const res=await api("post","auth/signup",{
-    name,email,password
-  });
-  if(res.status===200 || res.status===201){
-    alert("Signup succesfull");
-    navigate("/");
-  }
-} catch (error) {
-  alert("Error occured in sign up");
-  console.error("signup error:",error);
-  window.location.reload();
-}
-  };
-  const handleLogin=async()=>{
-try {
-  if( !email || !password){
-    alert("All fields are requried");
-    return;
-  }
-  const res=await api("post","auth/login",{
-    email,password
-  });
-  if(res.status===200 || res.status===201){
-    alert("Login succesfull");
-    navigate("/");
-  }
-} catch (error) {
-  alert("Error occured in login");
-  console.error("Login error:",error);
+  const navigate = useNavigate();
+  const { user, setUser, fetchUser } = useAuth();
 
-}
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
+
+  const handleSignup = async () => {
+    setErrorMsg("");
+    if (!name.trim() || !email.trim() || !password.trim()) {
+      setErrorMsg("All fields (Name, Email, Password) are required.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api("post", "auth/signup", {
+        name: name.trim(),
+        email: email.trim(),
+        password: password.trim()
+      });
+      if (res.status === 200 || res.status === 201) {
+        if (res.data?.user) setUser(res.data.user);
+        await fetchUser?.();
+        navigate("/dashboard");
+      }
+    } catch (error) {
+      setErrorMsg(error.response?.data?.message || "Error occurred during sign up. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const handleLogin = async () => {
+    setErrorMsg("");
+    if (!email.trim() || !password.trim()) {
+      setErrorMsg("Please enter both Email and Password.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api("post", "auth/login", {
+        email: email.trim(),
+        password: password.trim()
+      });
+      if (res.status === 200 || res.status === 201) {
+        if (res.data?.user) setUser(res.data.user);
+        await fetchUser?.();
+        navigate("/dashboard");
+      }
+    } catch (error) {
+      setErrorMsg(error.response?.data?.message || "Invalid email or password.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <>
       <style>{styles}</style>
@@ -168,15 +160,16 @@ try {
         <div className="auth-left">
           <div className="auth-left-bg" />
           <div className="auth-left-glow" />
-          <div className="auth-logo">Code<span>Bridge</span></div>
+          <div className="auth-logo" onClick={() => navigate("/")}>
+            Code<span>Bridge</span>
+          </div>
 
           <div className="auth-left-content">
             <h2 className="auth-left-title">
               Where great engineers get hired.
             </h2>
             <p className="auth-left-sub">
-              Real-time collaborative coding sessions,<br />
-             
+              Real-time collaborative coding sessions, sandbox judging, and live candidate assessments.
             </p>
           </div>
 
@@ -191,8 +184,8 @@ try {
               <div><span className="tc">✓ Engine ready</span></div>
               <div><span className="tc">✓ server online</span></div>
               <div><span className="tc">✓ WebRTC peers available</span></div>
-              <div><span className="tcyan">◉ Session #4f2a started</span></div>
-              <div><span className="tc">Waiting for candidate...</span><span className="tg" style={{animation:"pulse 1s infinite"}}>█</span></div>
+              <div><span className="tcyan">◉ Session active</span></div>
+              <div><span className="tc">Ready for coding...</span><span className="tg" style={{animation:"pulse 1s infinite"}}>█</span></div>
             </div>
           </div>
         </div>
@@ -201,70 +194,126 @@ try {
         <div className="auth-right">
           <div className="auth-form-wrap">
             <div className="tab-switch">
-              <button className={`tab-btn ${mode==="login"?"active":""}`} onClick={() => setMode("login")}>Sign In</button>
-              <button className={`tab-btn ${mode==="signup"?"active":""}`} onClick={() => setMode("signup")}>Create Account</button>
+              <button
+                type="button"
+                className={`tab-btn ${mode==="login"?"active":""}`}
+                onClick={() => { setMode("login"); setErrorMsg(""); }}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className={`tab-btn ${mode==="signup"?"active":""}`}
+                onClick={() => { setMode("signup"); setErrorMsg(""); }}
+              >
+                Create Account
+              </button>
             </div>
+
+            {errorMsg && <div className="auth-error">{errorMsg}</div>}
 
             {mode === "login" ? (
               <>
                 <h1 className="auth-form-title">Welcome back</h1>
-                <p className="auth-form-sub">Don't have an account? <a href="#" onClick={()=>setMode("signup")}>Sign up free</a></p>
+                <p className="auth-form-sub">Don't have an account? <a onClick={() => { setMode("signup"); setErrorMsg(""); }}>Sign up free</a></p>
 
                 <div className="form-group">
                   <label className="form-label">Email</label>
-                  <input  onChange={e => setEmail(e.target.value)}  className="form-input" type="email" placeholder="you@company.com" />
+                  <input
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleLogin()}
+                    className="form-input"
+                    type="email"
+                    placeholder="you@company.com"
+                    autoComplete="email"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Password</label>
-                  <input  onChange={e => setPassword(e.target.value)}  t className="form-input" type="password" placeholder="••••••••••" />
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleLogin()}
+                    className="form-input"
+                    type="password"
+                    placeholder="••••••••••"
+                    autoComplete="current-password"
+                  />
                 </div>
 
-                <button onClick={handleLogin} className="btn-full" style={{marginTop:8}}>Sign In →</button>
+                <button
+                  onClick={handleLogin}
+                  disabled={submitting}
+                  className="btn-full"
+                  style={{marginTop:8, opacity: submitting ? 0.7 : 1}}
+                >
+                  {submitting ? "Signing in..." : "Sign In →"}
+                </button>
 
                 <div className="divider">
                   <div className="divider-line"/><div className="divider-text">or</div><div className="divider-line"/>
                 </div>
-                <button onClick={() => { window.location.href = `${import.meta.env.VITE_BACKEND_URL}/api/auth/github`; }} className="btn-github">⌘ Continue with GitHub</button>
+                <button
+                  type="button"
+                  onClick={() => { window.location.href = `${import.meta.env.VITE_BACKEND_URL}/api/auth/github`; }}
+                  className="btn-github"
+                >
+                  ⌘ Continue with GitHub
+                </button>
               </>
             ) : (
               <>
                 <h1 className="auth-form-title">Create account</h1>
-                <p className="auth-form-sub">Already have one? <a href="#" onClick={()=>setMode("login")}>Sign in</a></p>
+                <p className="auth-form-sub">Already have one? <a onClick={() => { setMode("login"); setErrorMsg(""); }}>Sign in</a></p>
 
-<div className="form-row">
-  <div className="form-group">
-    <label className="form-label">Name</label>
-    <input 
-      onChange={e => setName(e.target.value)} 
-      className="form-input" 
-      placeholder="Rahul" 
-    />
-  </div>
-</div>
+                <div className="form-group">
+                  <label className="form-label">Full Name</label>
+                  <input
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleSignup()}
+                    className="form-input"
+                    type="text"
+                    placeholder="John Doe"
+                    autoComplete="name"
+                  />
+                </div>
 
-<div className="form-group">
-  <label className="form-label">Email</label>
-  <input 
-    onChange={e => setEmail(e.target.value)} 
-    className="form-input" 
-    type="email" 
-    placeholder="you@company.com" 
-  />
-</div>
+                <div className="form-group">
+                  <label className="form-label">Email Address</label>
+                  <input
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleSignup()}
+                    className="form-input"
+                    type="email"
+                    placeholder="you@company.com"
+                    autoComplete="email"
+                  />
+                </div>
 
-<div className="form-group">
-  <label className="form-label">Password</label>
-  <input 
-    onChange={e => setPassword(e.target.value)} 
-    className="form-input" 
-    type="password" 
-    placeholder="Min. 8 characters" 
-  />
-</div>
+                <div className="form-group">
+                  <label className="form-label">Password</label>
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleSignup()}
+                    className="form-input"
+                    type="password"
+                    placeholder="Min. 8 characters"
+                    autoComplete="new-password"
+                  />
+                </div>
 
-<button onClick={handleSignup} className="btn-full">
-  Create Account →
-</button>
+                <button
+                  onClick={handleSignup}
+                  disabled={submitting}
+                  className="btn-full"
+                  style={{marginTop:8, opacity: submitting ? 0.7 : 1}}
+                >
+                  {submitting ? "Creating Account..." : "Create Account →"}
+                </button>
               </>
             )}
           </div>

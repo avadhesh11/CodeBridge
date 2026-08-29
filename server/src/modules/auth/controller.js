@@ -183,6 +183,16 @@ githubCallback = async (req, res, next) => {
     next(error);
   }
 };
+
+logout = async (req, res, next) => {
+  try {
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+    return res.status(200).json({ success: true, message: "Logged out successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
 };
 
 export default new authController();
