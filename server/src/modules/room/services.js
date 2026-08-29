@@ -27,13 +27,17 @@ import { executionQueue, queueEvents } from "../../services/queueService.js";
 // };
 
 class roomServices{
-newRoom=async(userid, name, questionIds=[])=>{
+newRoom=async(userid, name, questionIds=[], mode="interview", isTimed=false, durationMinutes=null)=>{
     const roomID=nanoid(8);
     const roomData = {
         roomID,
         roomName: name,
         interviewer: userid,
-        status: "active"
+        status: "active",
+        mode: mode === "practice" ? "practice" : "interview",
+        isTimed: Boolean(isTimed),
+        durationMinutes: isTimed && durationMinutes ? Number(durationMinutes) : null,
+        expiresAt: null // Timer begins when session is launched/joined
     };
     if (questionIds.length > 0) {
         roomData.questions = questionIds;
@@ -45,12 +49,19 @@ newRoom=async(userid, name, questionIds=[])=>{
 }
  async getRoom(roomID) {
 
-    return await roomModel
+    const room = await roomModel
       .findOne({ roomID })
       .populate("interviewer", "name email")
       .populate("candidate", "name email")
       .populate("questions")
       .populate("submissions.question");
+
+    if (room && room.status === "active" && room.isTimed && room.expiresAt && new Date() >= new Date(room.expiresAt)) {
+      room.status = "closed";
+      await room.save();
+    }
+
+    return room;
 
   }
 

@@ -44,25 +44,37 @@ export default function registerRoom(io, socket) {
 
       if (!room) return socket.emit("error-message", "Room does not exist");
 
+      // Start timer on first room launch/join if not already active
+      if (room.isTimed && room.durationMinutes && !room.expiresAt) {
+        room.expiresAt = new Date(Date.now() + room.durationMinutes * 60 * 1000);
+        await room.save();
+      }
+
+      // Check if room has expired by time
+      if (room.isTimed && room.expiresAt && new Date() >= new Date(room.expiresAt)) {
+        room.status = "closed";
+        await room.save();
+      }
+
       if (room.status === "closed") {
         return socket.emit("error-message", "This room has expired");
       }
 
+      const isPractice = room.mode === "practice";
       const isInterviewer = room.interviewer.toString() === userId;
-
       const isExistingCandidate = room.candidate?.toString() === userId;
       const isNewCandidate = !room.candidate && !isInterviewer;
 
-      if (!isInterviewer && !isExistingCandidate && !isNewCandidate) {
+      if (!isPractice && !isInterviewer && !isExistingCandidate && !isNewCandidate) {
         return socket.emit("error-message", "Room is full");
       }
 
-      if (isNewCandidate) {
+      if (!isPractice && isNewCandidate) {
         room.candidate = userId;
         await room.save();
       }
 
-      const role = isInterviewer ? "interviewer" : "candidate";
+      const role = isPractice ? "practice" : (isInterviewer ? "interviewer" : "candidate");
 
       socket.join(roomID);
       socket.roomID = roomID;
@@ -92,12 +104,40 @@ export default function registerRoom(io, socket) {
         }
       }
 
-      socket.emit("joined-successfully", { role, roomID, currentLanguage: room.currentLanguage || "C++" });
+      socket.emit("joined-successfully", {
+        role,
+        roomID,
+        currentLanguage: room.currentLanguage || "C++",
+        mode: room.mode || "interview",
+        isTimed: room.isTimed || false,
+        durationMinutes: room.durationMinutes,
+        expiresAt: room.expiresAt
+      });
+
+      // If room is timed, handle auto-expiration broadcast
+      if (room.isTimed && room.expiresAt) {
+        const msRemaining = new Date(room.expiresAt).getTime() - Date.now();
+        if (msRemaining > 0) {
+          setTimeout(async () => {
+            try {
+              const r = await roommodel.findOne({ roomID });
+              if (r && r.status === "active") {
+                r.status = "closed";
+                await r.save();
+                io.to(roomID).emit("session-ended", { reason: "Time limit expired. Room closed." });
+              }
+            } catch (e) {
+              console.error("Timer expiration error:", e);
+            }
+          }, msRemaining);
+        }
+      }
 
       const currentSockets = roomSockets[roomID];
       console.log(`Room ${roomID} now has ${currentSockets.length} socket(s):`, currentSockets);
 
-      if (currentSockets.length >= 2) {
+      // Only start WebRTC call for interview mode with 2 participants
+      if (!isPractice && currentSockets.length >= 2) {
         console.log(`Both users in room ${roomID} — telling second joiner (${socket.id}) to start call`);
         socket.emit("start-call");
       }
@@ -152,7 +192,7 @@ export default function registerRoom(io, socket) {
       const room = await roommodel.findOne({ roomID: socket.roomID });
       if (!room) return socket.emit("error-message", "Room not found");
 
-      if (room.candidate?.toString() === socket.user.id) {
+      if (room.mode !== "practice" && room.candidate?.toString() === socket.user.id) {
         return socket.emit("error-message", "candidate cannot select question");
       }
 
@@ -202,7 +242,7 @@ socket.on("end-session", async () => {
     const room = await roommodel.findOne({ roomID });
     if (!room) return;
 
-    if (room.interviewer.toString() === socket.user.id) {
+    if (room.mode === "practice" || room.interviewer.toString() === socket.user.id) {
       room.status = "closed";
       // Archive currentQuestion into questions array if not already there
       if (room.currentQuestion) {
@@ -224,53 +264,10 @@ socket.on("end-session", async () => {
     if (!socket.roomID) return;
 
     const roomID = socket.roomID;
-    const role = socket.role;
 
     if (roomSockets[roomID]) {
       roomSockets[roomID] = roomSockets[roomID].filter(id => id !== socket.id);
       if (roomSockets[roomID].length === 0) delete roomSockets[roomID];
-    }
-
-    const room = await roommodel.findOne({ roomID });
-    if (!room) return;
-
-
-
-    if (role === "interviewer") {
-      // Wait for 5 seconds to see if the interviewer reconnects before closing the room
-      setTimeout(async () => {
-        let hasInterviewer = false;
-        if (roomSockets[roomID]) {
-          for (const sid of roomSockets[roomID]) {
-            const s = io.sockets.sockets.get(sid);
-            if (s && s.role === "interviewer") {
-              hasInterviewer = true;
-              break;
-            }
-          }
-        }
-        
-        if (!hasInterviewer) {
-          try {
-            const r = await roommodel.findOne({ roomID });
-            if (r && r.status === "active") {
-              r.status = "closed";
-              // Archive currentQuestion into questions array if not already there
-              if (r.currentQuestion) {
-                const qIdStr = r.currentQuestion.toString();
-                const alreadyIn = r.questions.some(q => q.toString() === qIdStr);
-                if (!alreadyIn) {
-                  r.questions.push(r.currentQuestion);
-                }
-              }
-              await r.save();
-              io.to(roomID).emit("session-ended");
-            }
-          } catch (e) {
-            console.error("Error closing room on interviewer disconnect:", e);
-          }
-        }
-      }, 5000);
     }
   });
 }

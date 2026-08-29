@@ -92,17 +92,33 @@ const mongo = async () => {
 };
 mongo();
 
+import { createBullBoard } from "@bull-board/api";
+import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
+import { ExpressAdapter } from "@bull-board/express";
+import { executionQueue } from "./services/queueService.js";
+
+const serverAdapter = new ExpressAdapter();
+serverAdapter.setBasePath("/admin/queues");
+
+createBullBoard({
+  queues: [new BullMQAdapter(executionQueue)],
+  serverAdapter: serverAdapter,
+});
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
 app.get("/api/me", authMiddleware, (req, res) => {
-
   res.json({
     success: true,
     user: req.user,
   });
 });
+
+// BullMQ Visual Dashboard
+app.use("/admin/queues", serverAdapter.getRouter());
+
 app.use("/api/auth",authRoutes);
 app.use("/api/room",roomRoutes);
 app.use("/api/question",questionRoutes);

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api from "../utils/api";
 import { useNavigate, useParams } from "react-router-dom";
-import { useEffect } from "react";
+import ImportQuestionsModal from "../components/ImportQuestionsModal.jsx";
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -292,7 +292,7 @@ const seedQuestions = [
 
 const blankQuestion = () => ({
   _id: null, tag: "Easy", title: "", description: "", constraints: "", timelimit: 2,
-  sampletcs: [{ input: "", output: "" }],
+  sampletcs: [{ input: "", output: "", explanation: "" }],
   hiddentcs: [],
 });
 
@@ -310,6 +310,15 @@ export default function QuestionManager() {
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [toast, setToast] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+
+  // Bank Picker State
+  const [bankPickerOpen, setBankPickerOpen] = useState(false);
+  const [bankQuestions, setBankQuestions] = useState([]);
+  const [selectedBankIds, setSelectedBankIds] = useState(new Set());
+  const [bankFilter, setBankFilter] = useState("all"); // "all" | "my" | "public"
+  const [bankSearch, setBankSearch] = useState("");
+  const [isAttaching, setIsAttaching] = useState(false);
 
   const showToast = () => { setToast(true); setTimeout(() => setToast(false), 2500); };
 
@@ -319,52 +328,104 @@ export default function QuestionManager() {
     return matchDiff && matchSearch;
   });
 
-const fetchQuestion=async()=>{
-try {
-  const res=await api("get",`question/private/${roomID}`);
-  const public_ques=await api("get",`question/public/${roomID}`);
-  const allQuestions = [...(public_ques.data.questions || []), ...(res.data.questions || [])];
-  setQuestions(allQuestions);
-} catch (error) {
-  console.error("error fetching questions:",error);
-}
+  const fetchQuestion = async () => {
+    try {
+      const res = await api("get", `question/room/${roomID}`);
+      setQuestions(res.data.questions || []);
+    } catch (error) {
+      console.error("error fetching room questions:", error);
+    }
   };
 
-const handleSaveQuestion=async()=>{
-try {
-  const res=await api("post",`question/add/${roomID}`,{
-      title:form.title,
-        description:form.description,
-        constraints:form.constraints,
-        sampletcs:form.sampletcs,
-        hiddentcs:form.hiddentcs,
-        tag:form.tag,
-        timelimit:form.timelimit,
-        qtype:"private",
+  const openBankPicker = async () => {
+    try {
+      const res = await api("get", "question/bank/all");
+      const pub = (res.data.data?.publicQuestions || []).map(q => ({ ...q, isMine: false }));
+      const mine = (res.data.data?.myQuestions || []).map(q => ({ ...q, isMine: true }));
+      const seen = new Set();
+      const combined = [];
+      for (const q of [...mine, ...pub]) {
+        if (!seen.has(q._id)) {
+          seen.add(q._id);
+          combined.push(q);
+        }
+      }
+      setBankQuestions(combined);
+      setSelectedBankIds(new Set());
+      setBankPickerOpen(true);
+    } catch (err) {
+      console.error("Failed to load bank questions:", err);
+    }
+  };
 
-  })
-  window.location.reload();
+  const toggleBankQuestion = (id) => {
+    setSelectedBankIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
-} catch (error) {
-  console.error("error adding questions:",error);
-}
-};
-const saveRoom=async()=>{
-try {
-if(confirm("Save details?")){
-navigate(`/code/${roomID}`);
-}
+  const handleAttachBankQuestions = async () => {
+    if (selectedBankIds.size === 0 || isAttaching) return;
+    setIsAttaching(true);
+    try {
+      await api("post", `question/room/${roomID}/attach`, {
+        questionIds: [...selectedBankIds]
+      });
+      await fetchQuestion();
+      setBankPickerOpen(false);
+      showToast();
+    } catch (err) {
+      console.error("Failed to attach questions:", err);
+      alert("Failed to attach questions to room.");
+    } finally {
+      setIsAttaching(false);
+    }
+  };
 
-} catch (error) {
-  console.error("error saving room:",error);
-}
-};
-useEffect(()=>{
-fetchQuestion();
-},[])
+  const handleSaveQuestion = async () => {
+    try {
+      await api("post", `question/add/${roomID}`, {
+        title: form.title,
+        description: form.description,
+        constraints: form.constraints,
+        sampletcs: form.sampletcs,
+        hiddentcs: form.hiddentcs,
+        tag: form.tag,
+        timelimit: form.timelimit,
+        qtype: "private",
+      });
+      await fetchQuestion();
+      setSelected(null);
+      showToast();
+    } catch (error) {
+      console.error("error adding questions:", error);
+    }
+  };
+
+  const launchRoom = async () => {
+    try {
+      if (confirm("Ready to start? Launching the session will take you into the live room and begin the session timer.")) {
+        navigate(`/code/${roomID}`);
+      }
+    } catch (error) {
+      console.error("error launching room:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuestion();
+  }, []);
+
   const selectQuestion = (q) => {
     setSelected(q._id);
-    setForm({ ...q, sampletcs: q.sampletcs.map(t => ({ ...t })), hiddentcs: q.hiddentcs.map(t => ({ ...t })) });
+    setForm({
+      ...q,
+      sampletcs: (q.sampletcs || []).map(t => ({ ...t })),
+      hiddentcs: (q.hiddentcs || []).map(t => ({ ...t }))
+    });
   };
 
   const startNew = () => {
@@ -372,22 +433,17 @@ fetchQuestion();
     setForm(blankQuestion());
   };
 
-  const saveQuestion = () => {
-    if (!form.title.trim()) return;
-    if (selected === "new") {
-      const newQ = { ...form, _id: "q" + Date.now() };
-      setQuestions(prev => [...prev, newQ]);
-      setSelected(newQ._id);
-    } else {
-      setQuestions(prev => prev.map(q => q._id === selected ? { ...form, _id: selected } : q));
+  const deleteQuestion = async (id) => {
+    try {
+      await api("delete", `question/room/${roomID}/${id}`);
+      setQuestions(prev => prev.filter(q => q._id !== id));
+      if (selected === id || selected === "new") { setSelected(null); }
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error("Failed to delete question:", err);
+      setQuestions(prev => prev.filter(q => q._id !== id));
+      setDeleteTarget(null);
     }
-    showToast();
-  };
-
-  const deleteQuestion = (id) => {
-    setQuestions(prev => prev.filter(q => q._id !== id));
-    if (selected === id || selected === "new") { setSelected(null); }
-    setDeleteTarget(null);
   };
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
@@ -412,6 +468,7 @@ const handleFileUpload = (e) => {
       const sample = (data.sample || []).map(tc => ({
         input: tc.input?.trim() || "",
         output: tc.output?.trim() || "",
+        explanation: tc.explanation?.trim() || "",
       }));
 
       const hidden = (data.hidden || []).map(tc => ({
@@ -445,7 +502,7 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
     });
   };
 
-  const addTC = (type) => setForm(f => ({ ...f, [type]: [...f[type], { input: "", output: "" }] }));
+  const addTC = (type) => setForm(f => ({ ...f, [type]: [...f[type], { input: "", output: "", explanation: "" }] }));
 
   const removeTC = (type, idx) => setForm(f => ({ ...f, [type]: f[type].filter((_, i) => i !== idx) }));
 
@@ -460,11 +517,28 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
 
       {/* TOP BAR */}
       <div className="topbar">
-        <div className="logo">Code<span>Bridge</span></div>
+        <div className="logo" onClick={() => navigate("/dashboard")}>Code<span>Bridge</span></div>
         <div className="sep" />
         <div className="breadcrumb">Dashboard <span>›</span> <b>Question Manager</b></div>
         <div className="spacer" />
         <div className="topbar-pill"><div className="live-dot" />{questions.length} questions</div>
+        <button
+          onClick={launchRoom}
+          style={{
+            background: "var(--green)",
+            color: "#000",
+            border: "none",
+            borderRadius: "6px",
+            padding: "6px 14px",
+            fontFamily: "'Syne', sans-serif",
+            fontWeight: 800,
+            fontSize: "0.78rem",
+            cursor: "pointer",
+            boxShadow: "0 0 12px rgba(57, 211, 83, 0.3)"
+          }}
+        >
+          🚀 Launch Session →
+        </button>
       </div>
 
       <div className="page">
@@ -516,14 +590,46 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
             ))}
           </div>
 
-          <div className="qlist-footer">
+          <div className="qlist-footer" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <button className="new-q-btn" onClick={startNew}>
               <span style={{ fontSize: "1rem" }}>＋</span> New Question
             </button>
-          </div>
-           <div className="qlist-footer">
-            <button className="new-q-btn" onClick={saveRoom}>
-             Save room details
+            <button
+              className="new-q-btn"
+              onClick={openBankPicker}
+              style={{
+                background: "var(--surface2)",
+                color: "var(--green)",
+                borderColor: "var(--border2)"
+              }}
+            >
+              <span style={{ fontSize: "1rem" }}>📚</span> Add from Bank / Library
+            </button>
+            <button
+              className="new-q-btn"
+              onClick={() => setImportModalOpen(true)}
+              style={{
+                background: "var(--surface2)",
+                color: "var(--cyan)",
+                borderColor: "var(--border2)"
+              }}
+            >
+              <span style={{ fontSize: "1rem" }}>📁</span> Import from JSON
+            </button>
+            <button
+              className="new-q-btn"
+              style={{
+                background: "var(--green)",
+                color: "#000",
+                borderColor: "var(--green)",
+                fontWeight: 800,
+                fontSize: "0.82rem",
+                boxShadow: "0 0 16px rgba(57, 211, 83, 0.35)",
+                marginTop: "4px"
+              }}
+              onClick={launchRoom}
+            >
+              🚀 Launch Session Now →
             </button>
           </div>
         </div>
@@ -534,8 +640,24 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
             <div className="empty-state">
               <div className="empty-icon">📝</div>
               <div className="empty-title">No question selected</div>
-              <div className="empty-sub">Pick a question from the list<br />or create a brand new one.</div>
-              <button className="empty-btn" onClick={startNew}>＋ New Question</button>
+              <div className="empty-sub">Pick a question from the list, add from your library,<br />or import from JSON.</div>
+              <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap", justifyContent: "center" }}>
+                <button className="empty-btn" onClick={startNew}>＋ New Question</button>
+                <button
+                  className="empty-btn"
+                  onClick={openBankPicker}
+                  style={{ background: "var(--surface2)", color: "var(--green)", borderColor: "var(--border2)" }}
+                >
+                  📚 Add from Library
+                </button>
+                <button
+                  className="empty-btn"
+                  onClick={() => setImportModalOpen(true)}
+                  style={{ background: "var(--surface2)", color: "var(--cyan)", borderColor: "var(--border2)" }}
+                >
+                  📁 Import from JSON
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -688,6 +810,19 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
                             disabled={form.qtype === "public"}
                           />
                         </div>
+                        {label === "Sample" && (
+                          <div className="tc-field" style={{ gridColumn: "1 / -1" }}>
+                            <div className="tc-field-label">Explanation (Optional)</div>
+                            <textarea
+                              className="tc-field-input"
+                              style={{ minHeight: "48px" }}
+                              placeholder={"e.g. Because nums[0] + nums[1] == 9, we return [0, 1]."}
+                              value={tc.explanation || ""}
+                              onChange={e => updateTC(type, i, "explanation", e.target.value)}
+                              disabled={form.qtype === "public"}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -760,6 +895,166 @@ hiddentcs: [...prev.hiddentcs, ...hidden],
 
       {/* SAVED TOAST */}
       {toast && <div className="toast">✓ Question saved successfully</div>}
+
+      {/* IMPORT FROM JSON MODAL */}
+      <ImportQuestionsModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={() => {
+          fetchQuestion();
+          showToast();
+        }}
+        roomId={roomID}
+        qtype="private"
+      />
+
+      {/* BANK / MY LIBRARY PICKER MODAL */}
+      {bankPickerOpen && (
+        <div className="overlay" onClick={() => setBankPickerOpen(false)}>
+          <div
+            className="dialog"
+            style={{ width: "620px", maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", padding: "24px" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "1.4rem" }}>📚</span>
+                <div>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>Add from Bank / Library</div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                    Select saved questions to attach to this room
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setBankPickerOpen(false)}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: "1.2rem", cursor: "pointer" }}
+              >✕</button>
+            </div>
+
+            {/* Filter Row */}
+            <div style={{ display: "flex", gap: "8px", margin: "10px 0" }}>
+              {["all", "my", "public"].map(f => (
+                <button
+                  key={f}
+                  onClick={() => setBankFilter(f)}
+                  style={{
+                    padding: "5px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid",
+                    borderColor: bankFilter === f ? "var(--green)" : "var(--border)",
+                    background: bankFilter === f ? "var(--green-dim)" : "var(--surface2)",
+                    color: bankFilter === f ? "var(--green)" : "var(--text-muted)",
+                    fontSize: "0.72rem",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 700,
+                    cursor: "pointer"
+                  }}
+                >
+                  {f === "all" ? `All (${bankQuestions.length})` : f === "my" ? `👤 My Library (${bankQuestions.filter(q => q.isMine).length})` : `🌐 Public (${bankQuestions.filter(q => !q.isMine).length})`}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="search-wrap" style={{ margin: "4px 0 12px" }}>
+              <span className="search-icon">⌕</span>
+              <input
+                className="search-input"
+                placeholder="Search questions by title..."
+                value={bankSearch}
+                onChange={e => setBankSearch(e.target.value)}
+              />
+            </div>
+
+            {/* Question List */}
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", maxHeight: "360px", paddingRight: "4px" }}>
+              {(() => {
+                const available = bankQuestions.filter(q => {
+                  const alreadyInRoom = questions.some(rq => rq._id === q._id || rq.title.trim().toLowerCase() === q.title.trim().toLowerCase());
+                  const matchSearch = q.title.toLowerCase().includes(bankSearch.toLowerCase());
+                  const matchFilter =
+                    bankFilter === "all" ? true :
+                    bankFilter === "my" ? q.isMine :
+                    !q.isMine;
+                  return !alreadyInRoom && matchSearch && matchFilter;
+                });
+
+                if (available.length === 0) {
+                  return (
+                    <div style={{ textAlign: "center", padding: "36px 12px", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.78rem" }}>
+                      No available questions found. (All matching questions may already be added to this room)
+                    </div>
+                  );
+                }
+
+                return available.map(q => {
+                  const isChecked = selectedBankIds.has(q._id);
+                  return (
+                    <div
+                      key={q._id}
+                      onClick={() => toggleBankQuestion(q._id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "12px 14px",
+                        borderRadius: "8px",
+                        border: "1px solid",
+                        borderColor: isChecked ? "var(--green)" : "var(--border)",
+                        background: isChecked ? "var(--green-dim)" : "var(--surface2)",
+                        cursor: "pointer",
+                        transition: "all 0.15s"
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        style={{ accentColor: "var(--green)", cursor: "pointer", width: "16px", height: "16px" }}
+                      />
+                      <span className={`diff-tag ${diffColor[q.tag] || "dt-easy"}`}>{q.tag}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{q.title}</span>
+                          {q.isMine && (
+                            <span style={{ fontSize: "0.6rem", background: "rgba(88,212,245,0.15)", color: "var(--cyan)", border: "1px solid rgba(88,212,245,0.3)", borderRadius: "4px", padding: "1px 5px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                              👤 My Library
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", marginTop: "2px", display: "flex", gap: "10px" }}>
+                          <span>⏱ {q.timelimit || 2}s</span>
+                          <span>📋 {Array.isArray(q.sampletcs) ? q.sampletcs.length : (q.sampletcs || 0)} sample</span>
+                          {q.hiddentcs && <span>🔒 {Array.isArray(q.hiddentcs) ? q.hiddentcs.length : (q.hiddentcs || 0)} hidden</span>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ fontSize: "0.75rem", fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)" }}>
+                {selectedBankIds.size} selected
+              </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button className="dialog-cancel" onClick={() => setBankPickerOpen(false)}>Cancel</button>
+                <button
+                  className="dialog-confirm"
+                  style={{ background: "var(--green)", color: "#000", fontWeight: 800, border: "none" }}
+                  disabled={selectedBankIds.size === 0 || isAttaching}
+                  onClick={handleAttachBankQuestions}
+                >
+                  {isAttaching ? "Attaching..." : `＋ Attach ${selectedBankIds.size} Question${selectedBankIds.size !== 1 ? "s" : ""} to Room`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

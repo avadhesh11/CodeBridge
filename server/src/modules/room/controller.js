@@ -4,10 +4,11 @@ class roomController{
 createRoom=async(req,res,next)=>{
 try {
     const userid=req.user._id;
-    const {name, questionId, questionIds}=req.body;
+    const {name, questionId, questionIds, mode, isTimed, durationMinutes, duration}=req.body;
     // Support both single questionId and array questionIds
     const ids = questionIds && questionIds.length > 0 ? questionIds : (questionId ? [questionId] : []);
-    const room=await roomServices.newRoom(userid, name, ids);
+    const roomDuration = durationMinutes || duration;
+    const room=await roomServices.newRoom(userid, name, ids, mode, isTimed, roomDuration);
     return res.status(201).json({
        success: true,
       message: "Room created successfully",

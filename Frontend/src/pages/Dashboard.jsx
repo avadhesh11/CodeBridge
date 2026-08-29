@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import { useAuth } from "../context/authContext";
+import ImportQuestionsModal from "../components/ImportQuestionsModal.jsx";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -173,40 +174,65 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [activeNav, setActiveNav] = useState("Sessions");
   const [showModal, setShowModal] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [qBankTab, setQBankTab] = useState("all"); // "all" | "my" | "public"
 
   const [rooms, setRooms] = useState([]);
   const [publicQuestions, setPublicQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const [roomsRes, questionsRes] = await Promise.all([
-          api("get", "room/user/all"),
-          api("get", "question/public")
-        ]);
-        setRooms(roomsRes.data.rooms || []);
-        const qFetched = questionsRes.data.questions || [];
-        setPublicQuestions(qFetched.length > 0 ? qFetched : questions.map(q => ({
-          _id: q.title,
-          title: q.title,
-          tag: q.diff,
-          timelimit: 2,
-          sampletcs: []
-        })));
-      } catch (error) {
-        console.error("Failed to fetch dashboard data:", error);
-        setPublicQuestions(questions.map(q => ({
-          _id: q.title,
-          title: q.title,
-          tag: q.diff,
-          timelimit: 2,
-          sampletcs: []
-        })));
-      } finally {
-        setLoading(false);
+  const fetchDashboardData = async () => {
+    try {
+      const [roomsRes, bankRes] = await Promise.all([
+        api("get", "room/user/all"),
+        api("get", "question/bank/all")
+      ]);
+      setRooms(roomsRes.data.rooms || []);
+      const pub = (bankRes.data.data?.publicQuestions || []).map(q => ({ ...q, isMine: false }));
+      const mine = (bankRes.data.data?.myQuestions || []).map(q => ({ ...q, isMine: true }));
+      const seen = new Set();
+      const combined = [];
+      for (const q of [...mine, ...pub]) {
+        if (!seen.has(q._id)) {
+          seen.add(q._id);
+          combined.push(q);
+        }
       }
-    };
+      setPublicQuestions(combined.length > 0 ? combined : questions.map(q => ({
+        _id: q.title,
+        title: q.title,
+        tag: q.diff,
+        timelimit: 2,
+        sampletcs: [],
+        isMine: false
+      })));
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+      setPublicQuestions(questions.map(q => ({
+        _id: q.title,
+        title: q.title,
+        tag: q.diff,
+        timelimit: 2,
+        sampletcs: [],
+        isMine: false
+      })));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUserQuestion = async (id) => {
+    if (!window.confirm("Delete this question from your personal library?")) return;
+    try {
+      await api("delete", `question/${id}`);
+      setPublicQuestions(prev => prev.filter(q => q._id !== id));
+    } catch (err) {
+      console.error("Failed to delete question:", err);
+      alert("Failed to delete question.");
+    }
+  };
+
+  useEffect(() => {
     fetchDashboardData();
   }, []);
 
@@ -298,17 +324,50 @@ export default function DashboardPage() {
                   <div>Create a new session to get started</div>
                 </div>
               ) : rooms.map((room) => {
+                const isPractice = room.mode === "practice";
                 const isInterviewer = (room.interviewer?._id || room.interviewer)?.toString() === user?._id?.toString();
                 const otherUser = isInterviewer ? room.candidate : room.interviewer;
-                const otherUserName = otherUser?.name || (isInterviewer ? "Waiting for candidate..." : "Interviewer");
+                const otherUserName = isPractice
+                  ? "Solo Practice"
+                  : (otherUser?.name || (isInterviewer ? "Waiting for candidate..." : "Interviewer"));
                 const displayId = `#${room.roomID.substring(0, 5)}`;
                 const statusLabel = room.status === "active" ? "● Live" : "✓ Done";
                 const statusClass = room.status === "active" ? "sp-live" : "sp-done";
 
                 return (
                   <div className="table-row" key={room._id} onClick={() => room.status === "active" && navigate(`/code/${room.roomID}`)} style={{ cursor: room.status === "active" ? "pointer" : "default" }}>
-                    <div className="td-mono" style={{color:"var(--cyan)"}}>{displayId}</div>
-                    <div style={{fontSize:"0.875rem",fontWeight:600}}>{otherUserName}</div>
+                    <div>
+                      <div className="td-mono" style={{ color: "var(--cyan)", fontWeight: 700 }}>{displayId}</div>
+                      <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+                        <span style={{
+                          fontSize: "0.6rem",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontWeight: 700,
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          background: isPractice ? "rgba(57,211,83,0.12)" : "rgba(88,212,245,0.12)",
+                          color: isPractice ? "var(--green)" : "var(--cyan)",
+                          border: `1px solid ${isPractice ? "rgba(57,211,83,0.3)" : "rgba(88,212,245,0.3)"}`
+                        }}>
+                          {isPractice ? "Practice" : "Interview"}
+                        </span>
+                        {room.isTimed && (
+                          <span style={{
+                            fontSize: "0.6rem",
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: "rgba(240,168,48,0.12)",
+                            color: "var(--amber)",
+                            border: "1px solid rgba(240,168,48,0.3)"
+                          }}>
+                            ⏱ {room.durationMinutes}m
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "0.875rem", fontWeight: 600 }}>{otherUserName}</div>
                     <div>{renderRoomQuestions(room)}</div>
                     <div><span className={`status-pill ${statusClass}`}>{statusLabel}</span></div>
                     <div>
@@ -330,16 +389,116 @@ export default function DashboardPage() {
                 <div className="dash-title">Question Bank</div>
                 <div className="dash-sub">$ codebridge --list-problems</div>
               </div>
-              <button className="btn-new">+ Add Question</button>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  className="btn-new"
+                  style={{
+                    background: "var(--surface2)",
+                    color: "var(--cyan)",
+                    border: "1px solid var(--border2)"
+                  }}
+                  onClick={() => setImportModalOpen(true)}
+                >
+                  📁 Import to My Library
+                </button>
+              </div>
             </div>
+
+            {/* Filter Tabs */}
+            <div style={{ display: "flex", gap: "8px", margin: "16px 0 20px" }}>
+              <button
+                type="button"
+                onClick={() => setQBankTab("all")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid",
+                  borderColor: qBankTab === "all" ? "var(--green)" : "var(--border)",
+                  background: qBankTab === "all" ? "var(--green-dim)" : "var(--surface2)",
+                  color: qBankTab === "all" ? "var(--green)" : "var(--text-muted)",
+                  fontSize: "0.78rem",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 700,
+                  cursor: "pointer"
+                }}
+              >
+                All ({publicQuestions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQBankTab("my")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid",
+                  borderColor: qBankTab === "my" ? "var(--cyan)" : "var(--border)",
+                  background: qBankTab === "my" ? "var(--cyan-dim)" : "var(--surface2)",
+                  color: qBankTab === "my" ? "var(--cyan)" : "var(--text-muted)",
+                  fontSize: "0.78rem",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 700,
+                  cursor: "pointer"
+                }}
+              >
+                👤 My Library ({publicQuestions.filter(q => q.isMine).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQBankTab("public")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid",
+                  borderColor: qBankTab === "public" ? "var(--amber)" : "var(--border)",
+                  background: qBankTab === "public" ? "var(--amber-dim)" : "var(--surface2)",
+                  color: qBankTab === "public" ? "var(--amber)" : "var(--text-muted)",
+                  fontSize: "0.78rem",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 700,
+                  cursor: "pointer"
+                }}
+              >
+                🌐 Public Bank ({publicQuestions.filter(q => !q.isMine).length})
+              </button>
+            </div>
+
             <div className="qbank-grid">
-              {publicQuestions.map((q,i) => (
-                <div className="qcard" key={q._id}>
-                  <div className={`qcard-diff qd-${q.tag.toLowerCase()}`}>{q.tag}</div>
-                  <div className="qcard-title">{q.title}</div>
-                  <div style={{marginTop:8}}>
-                    <span className="qcard-tag">{q.timelimit}s limit</span>
-                    <span className="qcard-tag">{q.sampletcs?.length || 0} sample TCs</span>
+              {publicQuestions.filter(q => {
+                if (qBankTab === "my") return q.isMine;
+                if (qBankTab === "public") return !q.isMine;
+                return true;
+              }).map((q, i) => (
+                <div className="qcard" key={q._id} style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div className={`qcard-diff qd-${(q.tag || "easy").toLowerCase()}`}>{q.tag || "Easy"}</div>
+                    {q.isMine && (
+                      <span style={{ fontSize: "0.6rem", background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(88,212,245,0.3)", borderRadius: "4px", padding: "1px 5px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                        👤 My Library
+                      </span>
+                    )}
+                  </div>
+                  <div className="qcard-title" style={{ marginTop: "6px" }}>{q.title}</div>
+                  <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <span className="qcard-tag">{q.timelimit || 2}s limit</span>
+                      <span className="qcard-tag">{q.sampletcs?.length || 0} sample TCs</span>
+                    </div>
+                    {q.isMine && (
+                      <button
+                        onClick={() => handleDeleteUserQuestion(q._id)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--red)",
+                          fontSize: "0.72rem",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          cursor: "pointer",
+                          fontWeight: 700
+                        }}
+                      >
+                        ✕ del
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -355,7 +514,13 @@ export default function DashboardPage() {
           )}
         </div>
 
-
+        {/* IMPORT FROM JSON MODAL */}
+        <ImportQuestionsModal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          onSuccess={() => fetchDashboardData()}
+          qtype="public"
+        />
 
       </div>
     </>

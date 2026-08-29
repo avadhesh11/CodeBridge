@@ -13,20 +13,40 @@ const styles = `
     --border: #21262d; --border2: #30363d;
     --green: #39d353; --green-dim: #1a4d2a; --cyan: #58d4f5;
     --amber: #f0a830; --text: #e6edf3; --text-muted: #7d8590; --red: #f85149;
+    --violet: #c084fc;
   }
   html, body, #root { height: 100%; }
   body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; overflow: hidden; }
-  .topbar { height: 48px; display: flex; align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; gap: 16px; flex-shrink: 0; }
-  .topbar-logo { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--green); }
+  .topbar { height: 48px; display: flex; align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; gap: 14px; flex-shrink: 0; }
+  .topbar-logo { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--green); cursor: pointer; }
   .topbar-logo span { color: var(--text-muted); }
   .topbar-sep { width: 1px; height: 20px; background: var(--border); }
   .topbar-spacer { flex: 1; }
-  .topbar-actions { display: flex; gap: 8px; }
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
   .topbar-btn { padding: 6px 14px; border-radius: 6px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: 'Syne', sans-serif; border: none; transition: all 0.15s; }
   .btn-screen { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
   .btn-screen:hover { color: var(--text); border-color: var(--border2); }
   .btn-end { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
   .btn-end:hover { background: rgba(248,81,73,0.25); }
+  
+  .mode-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700;
+    padding: 3px 10px; border-radius: 5px;
+  }
+  .mp-practice { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .mp-interview { background: rgba(88,212,245,0.12); color: var(--cyan); border: 1px solid rgba(88,212,245,0.3); }
+
+  .timer-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; font-weight: 700;
+    padding: 4px 10px; border-radius: 6px;
+  }
+  .timer-normal { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+  .timer-warn { background: rgba(240,168,48,0.15); border: 1px solid var(--amber); color: var(--amber); }
+  .timer-urgent { background: rgba(248,81,73,0.18); border: 1px solid var(--red); color: var(--red); animation: pulseTimer 1.2s infinite; }
+  @keyframes pulseTimer { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
   .interview-layout { display: flex; height: calc(100vh - 48px); }
   .problem-panel { min-width: 280px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
   .panel-tabs { display: flex; border-bottom: 1px solid var(--border); }
@@ -51,6 +71,7 @@ const styles = `
   .user-avatar { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 800; }
   .ua-green { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
   .ua-cyan { background: rgba(88,212,245,0.15); color: var(--cyan); border: 1px solid rgba(88,212,245,0.4); }
+  .ua-solo { background: rgba(57,211,83,0.12); color: var(--green); border: 1px solid var(--green); padding: 2px 8px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; }
   .editor-spacer { flex: 1; }
   .run-btn { padding: 7px 20px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-weight: 700; font-size: 0.8rem; cursor: pointer; font-family: 'Syne', sans-serif; transition: all 0.15s; }
   .run-btn:hover { border-color: var(--border2); }
@@ -152,6 +173,12 @@ export default function InterviewPage() {
   const iceCandidateQueueRef = useRef([]);
   const remoteDescSetRef = useRef(false);
 
+  const [roomMode, setRoomMode] = useState("interview");
+  const [isTimed, setIsTimed] = useState(false);
+  const [expiresAt, setExpiresAt] = useState(null);
+  const [durationMinutes, setDurationMinutes] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(null);
+
   const [code, setCode] = useState(defaultCode);
   const [language, setLanguage] = useState("C++");
   const [outputTab, setOutputTab] = useState("testcases");
@@ -160,6 +187,7 @@ export default function InterviewPage() {
   const [camOff, setCamOff] = useState(false);
   const [permissionError, setPermissionError] = useState(false);
   const [verdict, setVerdict] = useState({ status: "idle", output: "", error: null });
+  const [selectedCaseIndex, setSelectedCaseIndex] = useState(0);
   const [submissionResult, setSubmissionResult] = useState(null);
   const [chatMsg, setChatMsg] = useState("");
   const [messages, setMessages] = useState([]);
@@ -172,11 +200,46 @@ export default function InterviewPage() {
   const [testHeight, setTestHeight] = useState(Number(localStorage.getItem("testHeight")) || 250);
   const [screenSharing, setScreenSharing] = useState(false);
   const [screenShared, setScreenShared] = useState(false);
-const [candidateFullscreenWarning, setCandidateFullscreenWarning] = useState(false);
-const [interviewerDecisionPopup, setInterviewerDecisionPopup] = useState(false);
-const [warningMessage, setWarningMessage] = useState("");
-const [fullscreenViolations, setFullscreenViolations] = useState(0);
-const fullscreenLockRef = useRef(false);
+  const [candidateFullscreenWarning, setCandidateFullscreenWarning] = useState(false);
+  const [interviewerDecisionPopup, setInterviewerDecisionPopup] = useState(false);
+  const [warningMessage, setWarningMessage] = useState("");
+  const [fullscreenViolations, setFullscreenViolations] = useState(0);
+
+  // Live Timer Countdown Effect
+  useEffect(() => {
+    if (!isTimed || !expiresAt) return;
+
+    const calcTime = () => {
+      const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+      return Math.max(0, diff);
+    };
+
+    setTimeLeft(calcTime());
+
+    const timer = setInterval(() => {
+      const remaining = calcTime();
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        alert("⏰ Session time limit reached! The room has closed.");
+        navigate("/dashboard");
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isTimed, expiresAt, navigate]);
+
+  const formatTimer = (seconds) => {
+    if (seconds === null || seconds === undefined) return "--:--";
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
   const waitForMedia = () =>
     new Promise((resolve) => {
       if (localStreamRef.current) return resolve();
@@ -253,31 +316,32 @@ const fullscreenLockRef = useRef(false);
     socket.emit("screen-share-stop");
   };
 
-useEffect(() => {
-  if (!questions || !code) return;
+  useEffect(() => {
+    if (!questions || !code) return;
 
-  const timeout = setTimeout(() => {
-    localStorage.setItem(`${questions._id}_${language}`, code);
-  }, 300);
+    const timeout = setTimeout(() => {
+      localStorage.setItem(`${questions._id}_${language}`, code);
+    }, 300);
 
-  return () => clearTimeout(timeout);
-}, [code, questions, language]);
+    return () => clearTimeout(timeout);
+  }, [code, questions, language]);
 
-useEffect(() => {
-  if (questions) {
-    const saved = localStorage.getItem(`${questions._id}_${language}`);
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (saved) setCode(saved);
-    else setCode(languageTemplates[language]);
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }
-}, [questions, language]);
+  useEffect(() => {
+    if (questions) {
+      const saved = localStorage.getItem(`${questions._id}_${language}`);
+      if (saved) setCode(saved);
+      else setCode(languageTemplates[language]);
+    }
+  }, [questions, language]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Only start camera/mic in interview mode
   useEffect(() => {
+    if (roomMode === "practice") return;
+
     const startMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -295,59 +359,53 @@ useEffect(() => {
       }
     };
     startMedia();
-  }, []);
+  }, [roomMode]);
 
   const enterSecureFullscreen = async () => {
-  try {
-    const elem = document.documentElement;
-    if (elem.requestFullscreen) await elem.requestFullscreen();
-    else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
-    else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
-  } catch (err) {
-    console.log("fullscreen failed", err);
-  }
-};
-
-const sendCandidateWarning = () => {
-  socket.emit("interviewer-warn-candidate");
-  setInterviewerDecisionPopup(false);
-};
-
-const ignoreCandidateViolation = () => {
-  setInterviewerDecisionPopup(false);
-};
-useEffect(() => {
-  if (role === "candidate") {
-    setTimeout(() => {
-      enterSecureFullscreen();
-    }, 1000);
-  }
-}, [role]);
-
-
-// ============================================
-// 4. DETECT FULLSCREEN EXIT
-// ============================================
-useEffect(() => {
-  const handleFullscreenChange = () => {
-    if (role !== "candidate") return;
-
-    if (!document.fullscreenElement) {
-      setCandidateFullscreenWarning(true);
-      socket.emit("candidate-left-fullscreen");
-      setFullscreenViolations(prev => prev + 1);
+    try {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) await elem.requestFullscreen();
+      else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
+      else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
+    } catch (err) {
+      console.log("fullscreen failed", err);
     }
   };
 
-  document.addEventListener("fullscreenchange", handleFullscreenChange);
-  return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-}, [role]);
+  const sendCandidateWarning = () => {
+    socket.emit("interviewer-warn-candidate");
+    setInterviewerDecisionPopup(false);
+  };
 
+  const ignoreCandidateViolation = () => {
+    setInterviewerDecisionPopup(false);
+  };
 
-
+  // Fullscreen only enforced in interview mode for candidate
+  useEffect(() => {
+    if (roomMode === "practice" || role !== "candidate") return;
+    setTimeout(() => {
+      enterSecureFullscreen();
+    }, 1000);
+  }, [role, roomMode]);
 
   useEffect(() => {
-    if (!roomID) { alert("no room found!"); navigate("/"); return; }
+    const handleFullscreenChange = () => {
+      if (roomMode === "practice" || role !== "candidate") return;
+
+      if (!document.fullscreenElement) {
+        setCandidateFullscreenWarning(true);
+        socket.emit("candidate-left-fullscreen");
+        setFullscreenViolations(prev => prev + 1);
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [role, roomMode]);
+
+  useEffect(() => {
+    if (!roomID) { alert("No room found!"); navigate("/"); return; }
 
     socket.connect();
 
@@ -361,6 +419,10 @@ useEffect(() => {
 
     socket.on("joined-successfully", (data) => {
       setRole(data.role);
+      if (data.mode) setRoomMode(data.mode);
+      if (data.isTimed !== undefined) setIsTimed(data.isTimed);
+      if (data.expiresAt) setExpiresAt(data.expiresAt);
+      if (data.durationMinutes) setDurationMinutes(data.durationMinutes);
       if (data.currentLanguage) {
         setLanguage(data.currentLanguage);
       }
@@ -368,6 +430,8 @@ useEffect(() => {
 
     socket.on("error-message", (msg) => {
       console.log("Socket error:", msg);
+      alert(msg);
+      navigate("/dashboard");
     });
 
     socket.on("chat-history", (chats) => {
@@ -470,8 +534,8 @@ useEffect(() => {
       }
     });
 
-    socket.on("session-ended", () => {
-      alert("The interview session has been ended.");
+    socket.on("session-ended", (data) => {
+      alert(data?.reason || "The room session has been ended.");
       navigate("/dashboard");
     });
 
@@ -482,10 +546,16 @@ useEffect(() => {
       ].forEach(e => socket.off(e));
       socket.disconnect();
     };
-  }, [roomID,role]);
+  }, [roomID, role, navigate]);
 
   const handleEndSession = () => {
-    if (role === "interviewer") {
+    if (roomMode === "practice") {
+      const confirmLeave = window.confirm("Are you sure you want to exit your practice session?");
+      if (confirmLeave) {
+        socket.emit("end-session");
+        navigate("/dashboard");
+      }
+    } else if (role === "interviewer") {
       const confirmEnd = window.confirm("Are you sure you want to end this interview session? This will close the room for the candidate as well.");
       if (confirmEnd) {
         socket.emit("end-session");
@@ -506,29 +576,50 @@ useEffect(() => {
 
   const fetchQuestions = async () => {
     try {
-      const res = await api("get", `question/private/${roomID}`);
-      const publicRes = await api("get", `question/public/${roomID}`);
-      const allQ = [...(publicRes.data.questions || []), ...(res.data.questions || [])];
-      setAllQuestions(allQ);
+      const res = await api("get", `question/room/${roomID}`);
+      const qs = res.data.questions || [];
+      const seenIds = new Set();
+      const seenTitles = new Set();
+      const unique = [];
+      for (const q of qs) {
+        if (!q || !q.title) continue;
+        const idStr = q._id?.toString();
+        const titleNorm = q.title.trim().toLowerCase();
+        if (!seenIds.has(idStr) && !seenTitles.has(titleNorm)) {
+          seenIds.add(idStr);
+          seenTitles.add(titleNorm);
+          unique.push(q);
+        }
+      }
+      setAllQuestions(unique);
+      if (unique.length > 0) {
+        setQuestions(prev => prev ? (unique.find(q => q._id === prev._id || q.title.trim().toLowerCase() === prev.title?.trim().toLowerCase()) || unique[0]) : unique[0]);
+      }
     } catch (error) {
       console.log("unable to fetch questions", error);
     }
   };
 
-  const fetchSubmissions = async () => {
+  const fetchRoomDetails = async () => {
     try {
       const res = await api("get", `room/${roomID}`);
-      if (res.data?.room?.submissions) {
-        setSubmissions(res.data.room.submissions);
+      if (res.data?.room) {
+        const r = res.data.room;
+        if (r.mode) setRoomMode(r.mode);
+        if (r.isTimed !== undefined) setIsTimed(r.isTimed);
+        if (r.expiresAt) setExpiresAt(r.expiresAt);
+        if (r.durationMinutes) setDurationMinutes(r.durationMinutes);
+        if (r.submissions) setSubmissions(r.submissions);
       }
     } catch (error) {
-      console.log("unable to fetch submissions", error);
+      console.log("unable to fetch room details", error);
     }
   };
 
+  const isInterviewerRole = roomMode !== "practice" && role === "interviewer";
 
   const handleLanguageChange = (newLang) => {
-    if (role === "interviewer") return;
+    if (isInterviewerRole) return;
     setLanguage(newLang);
     const templateCode = languageTemplates[newLang];
     setCode(templateCode);
@@ -543,20 +634,24 @@ useEffect(() => {
     try {
       const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "sample", language });
       const { verdict, results, error } = res.data;
-      if (verdict === "CE") return setVerdict({ status: "error", output: "Compile error", error });
-      if (verdict === "RE") return setVerdict({ status: "error", output: "Runtime error", error });
+      setSelectedCaseIndex(0);
+      if (verdict === "CE") return setVerdict({ status: "error", title: "Compile Error", output: error || "Compilation failed", error, results: [] });
+      if (verdict === "RE") return setVerdict({ status: "error", title: "Runtime Error", output: error || "Runtime error occurred", error, results: [] });
+      if (verdict === "TLE") return setVerdict({ status: "error", title: "Time Limit Exceeded ⏱️", output: "⏱️ Time Limit Exceeded\n\nYour code took longer than the time limit to execute (possible infinite loop or large complexity).", error: null, results: [] });
       if (verdict === "AC") {
-        setVerdict({ status: "success", output: "All testcases passed ✅" });
+        setVerdict({ status: "success", title: "Accepted ✅", output: "All sample testcases passed!", error: null, results: results || [] });
       } else {
         const failedCase = results?.find(r => r.status !== "PASS");
         setVerdict({
           status: "error",
-          output: failedCase ? `Wrong Answer\n\nInput: ${failedCase.input}\nExpected: ${failedCase.expected}\nGot: ${failedCase.actual}` : verdict,
-          error: null
+          title: "Wrong Answer ✕",
+          output: failedCase ? `Wrong Answer\n\nInput: ${failedCase.input}\nExpected: ${failedCase.expected}\nGot: ${failedCase.actual}` : (verdict || "Failed"),
+          error: null,
+          results: results || []
         });
       }
     } catch {
-      setVerdict({ status: "error", output: "", error: "Execution failed" });
+      setVerdict({ status: "error", title: "Execution Error", output: "Execution failed on sandbox server.", error: "Execution failed", results: [] });
     }
   };
 
@@ -567,15 +662,17 @@ useEffect(() => {
     try {
       const res = await api("post", "room/codeTest", { roomID, code, questionId: questions._id, type: "hidden", language });
       const { verdict, error } = res.data;
-      if (verdict === "CE") return setVerdict({ status: "error", error });
+      if (verdict === "CE") return setVerdict({ status: "error", output: "Compile error", error });
+      if (verdict === "RE") return setVerdict({ status: "error", output: "Runtime error", error });
+      if (verdict === "TLE") return setVerdict({ status: "error", output: "⏱️ Time Limit Exceeded on hidden testcases.", error: null });
       if (verdict === "AC") {
         setVerdict({ status: "success", output: "🎉 Accepted on hidden testcases!" });
         setActiveTab("submissions");
       } else {
-        setVerdict({ status: "error", output: "Final Verdict: Failed on a hidden test-case" });
+        setVerdict({ status: "error", output: `Final Verdict: ${verdict || "Failed on a hidden test-case"}` });
       }
       setSubmissionResult(verdict);
-      fetchSubmissions();
+      fetchRoomDetails();
     } catch {
       setVerdict({ status: "error", error: "Submission failed" });
     }
@@ -590,9 +687,8 @@ useEffect(() => {
 
   useEffect(() => {
     fetchQuestions();
-    fetchSubmissions();
+    fetchRoomDetails();
   }, []);
-
 
   const diffColor = { Easy: "green", Medium: "orange", Hard: "red" };
 
@@ -600,11 +696,30 @@ useEffect(() => {
     <>
       <style>{styles}</style>
 
-      <div className="topbar" >
-        <div  className="topbar-logo">Code<span>Bridge</span></div>
+      {/* TOPBAR */}
+      <div className="topbar">
+        <div className="topbar-logo" onClick={() => navigate("/dashboard")}>
+          Code<span>Bridge</span>
+        </div>
         <div className="topbar-sep" />
+
+        {/* Room Mode Badge */}
+        <span className={`mode-pill ${roomMode === "practice" ? "mp-practice" : "mp-interview"}`}>
+          {roomMode === "practice" ? "🧑‍💻 Solo Practice" : "👥 Interview Mode"}
+        </span>
+
+        {/* Question Selector */}
         <select
-          style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)", padding: "5px 10px", borderRadius: "6px", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.75rem" }}
+          style={{
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+            color: "var(--text)",
+            padding: "5px 10px",
+            borderRadius: "6px",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "0.75rem",
+            outline: "none"
+          }}
           value={questions?._id || ""}
           onChange={(e) => {
             const q = allQuestions.find(q => q._id === e.target.value);
@@ -613,24 +728,40 @@ useEffect(() => {
             socket.emit("select-question", { questionId: q._id });
           }}
         >
-          <option value="">{questions ? questions.title : "Select Question"}</option>
-          {allQuestions.map((q) => (
-            <option key={q._id} value={q._id}>{q.title}</option>
-          ))}
+          {allQuestions.length === 0 ? (
+            <option value="">No questions in room</option>
+          ) : (
+            allQuestions.map((q) => (
+              <option key={q._id} value={q._id}>{q.title}</option>
+            ))
+          )}
         </select>
+
+        {/* Countdown Timer Badge */}
+        {isTimed && timeLeft !== null && (
+          <div className={`timer-pill ${timeLeft <= 120 ? "timer-urgent" : (timeLeft <= 600 ? "timer-warn" : "timer-normal")}`}>
+            <span>⏱</span>
+            <span>{formatTimer(timeLeft)}</span>
+          </div>
+        )}
+
         <div className="topbar-spacer" />
+
         <div className="topbar-actions">
-          <button className="topbar-btn btn-screen" onClick={screenSharing ? stopScreenShare : startScreenShare}>
-            {screenSharing ? "Stop Sharing" : "Start Screen Share"}
-          </button>
+          {roomMode !== "practice" && (
+            <button className="topbar-btn btn-screen" onClick={screenSharing ? stopScreenShare : startScreenShare}>
+              {screenSharing ? "Stop Sharing" : "Start Screen Share"}
+            </button>
+          )}
+
           <button className="topbar-btn btn-end" onClick={handleEndSession}>
-            {role === "interviewer" ? "✕ End Session" : "✕ Leave Session"}
+            {roomMode === "practice" ? "✕ Exit Practice" : (role === "interviewer" ? "✕ End Session" : "✕ Leave Session")}
           </button>
         </div>
       </div>
 
       <div className="interview-layout">
-
+        {/* LEFT PANEL: PROBLEM & SUBMISSIONS */}
         <div className="problem-panel" style={{ width: leftWidth }}>
           <div className="panel-tabs">
             {["problem", "submissions"].map(t => (
@@ -640,18 +771,24 @@ useEffect(() => {
           <div className="panel-body">
             {activeTab === "problem" ? (
               <>
-                {questions && <span className="prob-difficulty" style={{ backgroundColor: diffColor[questions.tag] }}>{questions.tag}</span>}
+                {questions && <span className="prob-difficulty" style={{ backgroundColor: diffColor[questions.tag] || "green" }}>{questions.tag}</span>}
                 <div className="prob-title">{questions ? questions.title : "Please Select Question First"}</div>
-                <div className="prob-desc">{questions ? questions.description : ""}</div>
+                <div className="prob-desc">{questions ? questions.description : "No question chosen. Select one from the top bar dropdown to begin."}</div>
                 {questions && <div className="prob-section-title">Examples</div>}
-                {questions && questions.sampletcs.map((tc, i) => (
+                {questions && questions.sampletcs?.map((tc, i) => (
                   <div className="prob-example" key={i}>
                     <div style={{ marginBottom: 6 }}><span>Input: </span><pre style={{ display: "inline", color: "var(--cyan)" }}>{tc.input}</pre></div>
-                    <div><span>Output: </span><pre style={{ display: "inline", color: "var(--green)" }}>{tc.output}</pre></div>
+                    <div style={{ marginBottom: tc.explanation ? 6 : 0 }}><span>Output: </span><pre style={{ display: "inline", color: "var(--green)" }}>{tc.output}</pre></div>
+                    {tc.explanation && (
+                      <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                        <span style={{ color: "var(--amber)", fontWeight: 700 }}>Explanation: </span>
+                        <span>{tc.explanation}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
-                {questions && questions.constraints.split("\n").map((c, i) => <div className="prob-constraint" key={i}>{c}</div>)}
-                {questions && <div className="prob-constraint">TimeLimit: {questions.timelimit}s</div>}
+                {questions?.constraints && questions.constraints.split("\n").map((c, i) => <div className="prob-constraint" key={i}>{c}</div>)}
+                {questions && <div className="prob-constraint">TimeLimit: {questions.timelimit || 2}s</div>}
               </>
             ) : (
               <>
@@ -702,21 +839,23 @@ useEffect(() => {
           </div>
         </div>
 
+        {/* RESIZE HANDLE */}
         <div style={{ width: "4px", cursor: "col-resize", background: "var(--border)", flexShrink: 0 }}
           onMouseDown={(e) => {
             const startX = e.clientX; const startWidth = leftWidth;
-            const onMove = (e) => { const w = startWidth + (e.clientX - startX); if (w > 250 && w < 600) { setLeftWidth(w); localStorage.setItem("leftWidth", w); } };
+            const onMove = (e) => { const w = startWidth + (e.clientX - startX); if (w > 250 && w < 750) { setLeftWidth(w); localStorage.setItem("leftWidth", w); } };
             const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
             document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
           }}
         />
 
+        {/* CENTER / EDITOR PANEL */}
         <div className="editor-panel">
           <div className="editor-topbar">
             <select
               className="lang-tag"
-              style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)", padding: "3px 10px", borderRadius: "4px", cursor: role === "interviewer" ? "not-allowed" : "pointer" }}
-              disabled={role === "interviewer"}
+              style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)", padding: "3px 10px", borderRadius: "4px", cursor: isInterviewerRole ? "not-allowed" : "pointer" }}
+              disabled={isInterviewerRole}
               value={language}
               onChange={(e) => handleLanguageChange(e.target.value)}
             >
@@ -725,14 +864,22 @@ useEffect(() => {
               <option value="Java">Java</option>
               <option value="JavaScript">JavaScript</option>
             </select>
+
             <div className="users-row">
-              <div className="user-avatar ua-green" title="Interviewer">IM</div>
-              <div className="user-avatar ua-cyan" title="Candidate">CA</div>
+              {roomMode === "practice" ? (
+                <div className="ua-solo">🧑‍💻 Solo Practice</div>
+              ) : (
+                <>
+                  <div className="user-avatar ua-green" title="Interviewer">IM</div>
+                  <div className="user-avatar ua-cyan" title="Candidate">CA</div>
+                </>
+              )}
             </div>
+
             <div className="editor-spacer" />
             <button className="run-btn" onClick={handleRun}>▷ Run</button>
             <button className="submit-btn" onClick={handleSubmit}>Submit</button>
-            <button className="run-btn" style={{ backgroundColor: "red" }} onClick={reset}>Reset Layout</button>
+            <button className="run-btn" style={{ background: "rgba(248,81,73,0.15)", color: "var(--red)", borderColor: "rgba(248,81,73,0.3)" }} onClick={reset}>Reset Layout</button>
           </div>
 
           <div className="editor-wrapper">
@@ -745,13 +892,12 @@ useEffect(() => {
                 theme="vs-dark"
                 value={code}
                 onChange={(v) => {
-                  if (role === "interviewer") return;
-                  setCode(v);
-        
-                  socket.emit("code-change", { code: v });
+                  if (isInterviewerRole) return;
+                  setCode(v || "");
+                  socket.emit("code-change", { code: v || "" });
                 }}
                 options={{
-                  readOnly: role === "interviewer",
+                  readOnly: isInterviewerRole,
                   fontSize: 13,
                   fontFamily: "'JetBrains Mono', monospace",
                   lineHeight: 22,
@@ -776,28 +922,185 @@ useEffect(() => {
 
           <div className="output-panel" style={{ height: testHeight }}>
             <div className="output-tabs">
-              {["output", "testcases"].map(t => (
-                <div key={t} className={`output-tab ${outputTab === t ? "active" : ""}`} onClick={() => setOutputTab(t)} style={{ textTransform: "capitalize" }}>{t}</div>
+              {[
+                { id: "output", label: "⚡ Test Result" },
+                { id: "testcases", label: "📋 Sample Testcases" }
+              ].map(t => (
+                <div
+                  key={t.id}
+                  className={`output-tab ${outputTab === t.id ? "active" : ""}`}
+                  onClick={() => setOutputTab(t.id)}
+                >
+                  {t.label}
+                </div>
               ))}
             </div>
             <div className="output-body">
-              {outputTab === "output" ? (
+              {outputTab === "output" && (
                 <>
-                  {verdict.status === "idle" && <div className="output-text">No output yet. Click Run to execute.</div>}
-                  {verdict.status === "running" && <div className="verdict-row"><span className="verdict-badge vb-running">⟳ Running...</span><span className="output-meta">Compiling with g++...</span></div>}
-                  {verdict.status === "success" && <><div className="verdict-row"><span className="verdict-badge vb-accepted">✓ Accepted</span></div><div className="output-text">{verdict.output}</div></>}
-                  {verdict.status === "error" && <><div className="verdict-row"><span className="verdict-badge vb-error">✕ Failed</span></div><div className="output-text">{verdict.error || verdict.output}</div></>}
-                </>
-              ) : (
-                <div>
-                  {questions && questions.sampletcs.map((tc, i) => (
-                    <div key={i} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace", fontSize: "0.75rem" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Case {i + 1}:</span>
-                      <pre style={{ color: "var(--cyan)" }}>{tc.input}</pre>
-                      <span style={{ color: "var(--text-muted)" }}>Expected:</span>
-                      <pre style={{ color: "var(--green)" }}>{tc.output}</pre>
+                  {verdict.status === "idle" && (
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", padding: "12px 4px" }}>
+                      No output yet. Click <b style={{ color: "var(--green)" }}>▷ Run</b> to test against sample cases or <b style={{ color: "var(--green)" }}>Submit</b> for hidden judging.
                     </div>
-                  ))}
+                  )}
+
+                  {verdict.status === "running" && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px 0" }}>
+                      <span className="verdict-badge vb-running" style={{ fontSize: "0.85rem", padding: "6px 14px" }}>
+                        ⟳ Running Sandbox...
+                      </span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                        Enqueued in BullMQ · Executing in Docker sandbox container...
+                      </span>
+                    </div>
+                  )}
+
+                  {verdict.status !== "idle" && verdict.status !== "running" && (
+                    <div>
+                      {/* Top status bar */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", paddingBottom: "10px", borderBottom: "1px solid var(--border)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span
+                            className={`verdict-badge ${verdict.status === "success" ? "vb-accepted" : "vb-error"}`}
+                            style={{ fontSize: "0.85rem", padding: "5px 14px", fontWeight: 800 }}
+                          >
+                            {verdict.status === "success" ? "✓ Accepted" : (verdict.title || "✕ Failed")}
+                          </span>
+                          <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                            {verdict.results?.length > 0
+                              ? `${verdict.results.filter(r => r.status === "PASS").length}/${verdict.results.length} testcases passed`
+                              : (verdict.error ? "Error occurred during execution" : "")}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* If Compile / Runtime / TLE error with string */}
+                      {(verdict.error || verdict.output) && (!verdict.results || verdict.results.length === 0) && (
+                        <div style={{ background: "rgba(248,81,73,0.08)", border: "1px solid rgba(248,81,73,0.3)", borderRadius: "8px", padding: "14px", color: "var(--red)", fontSize: "0.82rem", whiteSpace: "pre-wrap", fontFamily: "'JetBrains Mono', monospace" }}>
+                          {verdict.error || verdict.output}
+                        </div>
+                      )}
+
+                      {/* Multi-case results cards */}
+                      {verdict.results && verdict.results.length > 0 && (
+                        <div>
+                          {/* Case pills */}
+                          <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+                            {verdict.results.map((r, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setSelectedCaseIndex(idx)}
+                                style={{
+                                  padding: "6px 14px",
+                                  borderRadius: "6px",
+                                  border: "1px solid",
+                                  borderColor: selectedCaseIndex === idx ? (r.status === "PASS" ? "var(--green)" : "var(--red)") : "var(--border)",
+                                  background: selectedCaseIndex === idx ? (r.status === "PASS" ? "var(--green-dim)" : "rgba(248,81,73,0.15)") : "var(--surface2)",
+                                  color: r.status === "PASS" ? "var(--green)" : "var(--red)",
+                                  fontFamily: "'JetBrains Mono', monospace",
+                                  fontSize: "0.75rem",
+                                  fontWeight: 700,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                {r.status === "PASS" ? "✓" : "✕"} Case {idx + 1}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Selected Case Detail */}
+                          {verdict.results[selectedCaseIndex] && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                              <div>
+                                <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: "4px" }}>Input</div>
+                                <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "6px", padding: "10px 14px", color: "var(--cyan)", fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>
+                                  {verdict.results[selectedCaseIndex].input || "<empty>"}
+                                </div>
+                              </div>
+
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                                <div>
+                                  <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--green)", textTransform: "uppercase", marginBottom: "4px" }}>Expected Output</div>
+                                  <div style={{ background: "var(--surface2)", border: "1px solid rgba(57,211,83,0.3)", borderRadius: "6px", padding: "10px 14px", color: "var(--green)", fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>
+                                    {verdict.results[selectedCaseIndex].expected}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: "0.7rem", fontWeight: 700, color: verdict.results[selectedCaseIndex].status === "PASS" ? "var(--green)" : "var(--red)", textTransform: "uppercase", marginBottom: "4px" }}>
+                                    Your Output ({verdict.results[selectedCaseIndex].status === "PASS" ? "Matched ✓" : "Diff ✕"})
+                                  </div>
+                                  <div style={{
+                                    background: "var(--surface2)",
+                                    border: "1px solid",
+                                    borderColor: verdict.results[selectedCaseIndex].status === "PASS" ? "rgba(57,211,83,0.3)" : "rgba(248,81,73,0.4)",
+                                    borderRadius: "6px",
+                                    padding: "10px 14px",
+                                    color: verdict.results[selectedCaseIndex].status === "PASS" ? "var(--green)" : "var(--red)",
+                                    fontSize: "0.82rem",
+                                    whiteSpace: "pre-wrap"
+                                  }}>
+                                    {verdict.results[selectedCaseIndex].actual || "<empty output>"}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {outputTab === "testcases" && (
+                <div>
+                  {/* Sample testcase pills */}
+                  {questions?.sampletcs?.length > 0 && (
+                    <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+                      {questions.sampletcs.map((_, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setSelectedCaseIndex(idx)}
+                          style={{
+                            padding: "6px 14px",
+                            borderRadius: "6px",
+                            border: "1px solid",
+                            borderColor: selectedCaseIndex === idx ? "var(--cyan)" : "var(--border)",
+                            background: selectedCaseIndex === idx ? "rgba(88,212,245,0.15)" : "var(--surface2)",
+                            color: selectedCaseIndex === idx ? "var(--cyan)" : "var(--text-muted)",
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: "0.75rem",
+                            fontWeight: 700,
+                            cursor: "pointer"
+                          }}
+                        >
+                          Case {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {questions?.sampletcs?.[selectedCaseIndex] ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      <div>
+                        <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: "4px" }}>Input</div>
+                        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "6px", padding: "10px 14px", color: "var(--cyan)", fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>
+                          {questions.sampletcs[selectedCaseIndex].input}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--green)", textTransform: "uppercase", marginBottom: "4px" }}>Expected Output</div>
+                        <div style={{ background: "var(--surface2)", border: "1px solid rgba(57,211,83,0.3)", borderRadius: "6px", padding: "10px 14px", color: "var(--green)", fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>
+                          {questions.sampletcs[selectedCaseIndex].output}
+                        </div>
+                      </div>
+                    
+                    </div>
+                  ) : (
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", padding: "12px 0" }}>No sample test cases available.</div>
+                  )}
                 </div>
               )}
             </div>
@@ -812,157 +1115,155 @@ useEffect(() => {
           </div>
         )}
 
-        <div className="video-panel">
-          <div className="video-section" style={{ flex: "0 0 auto" }}>
-            {permissionError && (
-              <div className="perm-banner">
-                Camera/mic blocked — click the 🔒 in your browser address bar and allow permissions, then refresh.
-              </div>
-            )}
-            <div className="video-box">
-              <video ref={localVideoRef} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </div>
-            <div className="video-box">
-              {!screenShared && (
-                <video
-                  ref={(el) => {
-                    remoteVideoRef.current = el;
-                    if (el && remoteStreamRef.current) {
-                      el.srcObject = remoteStreamRef.current;
-                      el.muted = false;
-                      el.play().catch(() => {});
-                    }
-                  }}
-                  autoPlay
-                  playsInline
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              )}
-            </div>
-            <div className="video-controls">
-              <button className={`vc-btn ${micMuted ? "muted" : ""}`} onClick={() => {
-                const newState = !micMuted; setMicMuted(newState);
-                const t = localStreamRef.current?.getAudioTracks()[0];
-                if (t) t.enabled = !newState;
-              }} title="Mute">{micMuted ? "🔇" : "🎤"}</button>
-              <button className={`vc-btn ${camOff ? "muted" : ""}`} onClick={() => {
-                const newState = !camOff; setCamOff(newState);
-                const t = localStreamRef.current?.getVideoTracks()[0];
-                if (t) t.enabled = !newState;
-              }} title="Camera">{camOff ? "📷" : "📹"}</button>
-              <button className="vc-btn" title="Settings">⚙️</button>
-            </div>
-          </div>
-
-          <div className="chat-section">
-            <div className="chat-header">Chat</div>
-            <div className="chat-messages">
-              {messages.map((m, i) => (
-                <div className="chat-msg" key={i}>
-                  <div className={`chat-msg-name ${m.color}`}>{m.name}</div>
-                  <div className="chat-msg-text">{m.text}</div>
+        {/* RIGHT PANEL: VIDEO & CHAT (INTERVIEW MODE ONLY) */}
+        {roomMode !== "practice" && (
+          <div className="video-panel">
+            <div className="video-section" style={{ flex: "0 0 auto" }}>
+              {permissionError && (
+                <div className="perm-banner">
+                  Camera/mic blocked — click the 🔒 in your address bar and allow permissions, then refresh.
                 </div>
-              ))}
-              <div ref={chatEndRef} />
+              )}
+              <div className="video-box">
+                <video ref={localVideoRef} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+              <div className="video-box">
+                {!screenShared && (
+                  <video
+                    ref={(el) => {
+                      remoteVideoRef.current = el;
+                      if (el && remoteStreamRef.current) {
+                        el.srcObject = remoteStreamRef.current;
+                        el.muted = false;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                )}
+              </div>
+              <div className="video-controls">
+                <button className={`vc-btn ${micMuted ? "muted" : ""}`} onClick={() => {
+                  const newState = !micMuted; setMicMuted(newState);
+                  const t = localStreamRef.current?.getAudioTracks()[0];
+                  if (t) t.enabled = !newState;
+                }} title="Mute">{micMuted ? "🔇" : "🎤"}</button>
+                <button className={`vc-btn ${camOff ? "muted" : ""}`} onClick={() => {
+                  const newState = !camOff; setCamOff(newState);
+                  const t = localStreamRef.current?.getVideoTracks()[0];
+                  if (t) t.enabled = !newState;
+                }} title="Camera">{camOff ? "📷" : "📹"}</button>
+                <button className="vc-btn" title="Settings">⚙️</button>
+              </div>
             </div>
-            <div className="chat-input-row">
-              <input className="chat-input" placeholder="Send a message..." value={chatMsg} onChange={e => setChatMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMsg()} />
-              <button className="chat-send" onClick={sendMsg}>↵</button>
-            </div>
-          </div>
-        </div>
 
-        {camOff && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#000" }}>
-            Camera Off
+            <div className="chat-section">
+              <div className="chat-header">Chat</div>
+              <div className="chat-messages">
+                {messages.map((m, i) => (
+                  <div className="chat-msg" key={i}>
+                    <div className={`chat-msg-name ${m.color}`}>{m.name}</div>
+                    <div className="chat-msg-text">{m.text}</div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+              <div className="chat-input-row">
+                <input className="chat-input" placeholder="Send a message..." value={chatMsg} onChange={e => setChatMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMsg()} />
+                <button className="chat-send" onClick={sendMsg}>↵</button>
+              </div>
+            </div>
           </div>
         )}
-        {/* Candidate forced re-enter fullscreen popup */}
-        {candidateFullscreenWarning && (
-  <div style={{
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.85)",
-    zIndex: 9999,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center"
-  }}>
-    <div style={{
-      background: "#111",
-      border: "1px solid red",
-      borderRadius: "12px",
-      padding: "30px",
-      textAlign: "center",
-      width: "420px"
-    }}>
-      <h2 style={{ color: "red", marginBottom: "12px" }}>Secure Interview Mode Exited</h2>
-      <p style={{ color: "#aaa", marginBottom: "20px" }}>
-        You left fullscreen interview mode. Please re-enter immediately for fairness.
-      </p>
-      <button
-        onClick={() => {
-          enterSecureFullscreen();
-          setCandidateFullscreenWarning(false);
-        }}
-        style={{
-          padding: "10px 22px",
-          background: "red",
-          color: "white",
-          border: "none",
-          borderRadius: "8px",
-          cursor: "pointer"
-        }}
-      >
-        Re-enter Fullscreen
-      </button>
-    </div>
-  </div>
-)}
 
-{/* Interviewer decision popup */}
-{interviewerDecisionPopup && (
-  <div style={{
-    position: "fixed",
-    top: "20px",
-    right: "20px",
-    background: "#161b22",
-    border: "1px solid orange",
-    borderRadius: "10px",
-    padding: "18px",
-    zIndex: 9999,
-    width: "320px"
-  }}>
-    <div style={{ color: "orange", fontWeight: 800, marginBottom: "10px" }}>
-      Candidate left fullscreen mode.
-    </div>
-    <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "14px" }}>
-      Ask candidate to re-enter secure mode?
-    </div>
-    <div style={{ display: "flex", gap: "10px" }}>
-      <button onClick={sendCandidateWarning} style={{ flex: 1, padding: "8px", background: "orange", border: "none", borderRadius: "6px", cursor: "pointer" }}>Warn Candidate</button>
-      <button onClick={ignoreCandidateViolation} style={{ flex: 1, padding: "8px", background: "#333", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>Leave This Time</button>
-    </div>
-  </div>
-)}
+        {/* Interview anti-cheat candidate forced fullscreen warning */}
+        {roomMode !== "practice" && candidateFullscreenWarning && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.85)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <div style={{
+              background: "#111",
+              border: "1px solid red",
+              borderRadius: "12px",
+              padding: "30px",
+              textAlign: "center",
+              width: "420px"
+            }}>
+              <h2 style={{ color: "red", marginBottom: "12px" }}>Secure Interview Mode Exited</h2>
+              <p style={{ color: "#aaa", marginBottom: "20px" }}>
+                You left fullscreen interview mode. Please re-enter immediately for fairness.
+              </p>
+              <button
+                onClick={() => {
+                  enterSecureFullscreen();
+                  setCandidateFullscreenWarning(false);
+                }}
+                style={{
+                  padding: "10px 22px",
+                  background: "red",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer"
+                }}
+              >
+                Re-enter Fullscreen
+              </button>
+            </div>
+          </div>
+        )}
 
-{/* candidate top red warning bar */}
-{warningMessage && (
-  <div style={{
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    background: "rgba(255,0,0,0.85)",
-    color: "white",
-    textAlign: "center",
-    padding: "10px",
-    zIndex: 9999,
-    fontWeight: 700
-  }}>
-    {warningMessage}
-  </div>
-)}
+        {/* Interviewer decision popup */}
+        {roomMode !== "practice" && interviewerDecisionPopup && (
+          <div style={{
+            position: "fixed",
+            top: "20px",
+            right: "20px",
+            background: "#161b22",
+            border: "1px solid orange",
+            borderRadius: "10px",
+            padding: "18px",
+            zIndex: 9999,
+            width: "320px"
+          }}>
+            <div style={{ color: "orange", fontWeight: 800, marginBottom: "10px" }}>
+              Candidate left fullscreen mode.
+            </div>
+            <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "14px" }}>
+              Ask candidate to re-enter secure mode?
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={sendCandidateWarning} style={{ flex: 1, padding: "8px", background: "orange", border: "none", borderRadius: "6px", cursor: "pointer" }}>Warn Candidate</button>
+              <button onClick={ignoreCandidateViolation} style={{ flex: 1, padding: "8px", background: "#333", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>Leave This Time</button>
+            </div>
+          </div>
+        )}
+
+        {/* candidate top warning bar */}
+        {roomMode !== "practice" && warningMessage && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            background: "rgba(255,0,0,0.85)",
+            color: "white",
+            textAlign: "center",
+            padding: "10px",
+            zIndex: 9999,
+            fontWeight: 700
+          }}>
+            {warningMessage}
+          </div>
+        )}
 
       </div>
     </>

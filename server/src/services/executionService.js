@@ -40,30 +40,64 @@ const toDockerPath = (p) => {
   return p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
 };
 
-const runDocker = (args, input = "") => {
+const MAX_OUTPUT_SIZE = 1024 * 1024; // 1 MB limit to prevent output flooding and memory freeze
+
+const runDocker = (args, input = "", timeoutMs = 15000) => {
   return new Promise((resolve, reject) => {
     const proc = spawn("docker", args);
 
     let stdout = "";
     let stderr = "";
+    let isSettled = false;
+
+    // Hard fallback timeout to kill runaway processes and containers
+    const timer = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        try {
+          proc.kill("SIGKILL");
+        } catch {}
+        resolve({ code: 124, stdout, stderr: "Time Limit Exceeded" });
+      }
+    }, timeoutMs);
 
     proc.stdout.on("data", (data) => {
-      stdout += data.toString();
+      if (stdout.length < MAX_OUTPUT_SIZE) {
+        stdout += data.toString();
+      }
     });
 
     proc.stderr.on("data", (data) => {
-      stderr += data.toString();
+      if (stderr.length < MAX_OUTPUT_SIZE) {
+        stderr += data.toString();
+      }
     });
 
     proc.on("close", (code) => {
-      resolve({ code, stdout, stderr });
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr });
+      }
     });
 
-    proc.on("error", (err) => reject(err));
+    proc.on("error", (err) => {
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
 
     if (input) {
-      proc.stdin.write(input);
-      proc.stdin.end();
+      try {
+        proc.stdin.write(input);
+        proc.stdin.end();
+      } catch {}
+    } else {
+      try {
+        proc.stdin.end();
+      } catch {}
     }
   });
 };
@@ -81,7 +115,8 @@ const compileCode = async (tempDir, langConfig) => {
   
   const dockerArgs = [
     "run",
-    "--rm"
+    "--rm",
+    "--log-driver=none"
   ];
   
   if (volumeName) {
@@ -98,16 +133,18 @@ const compileCode = async (tempDir, langConfig) => {
     langConfig.compileCmd
   );
   
-  return runDocker(dockerArgs);
+  return runDocker(dockerArgs, "", 15000);
 };
 
 const runSingleTest = async (tc, dockerPath, langConfig, timelimit) => {
   const tempId = path.basename(dockerPath);
   const volumeName = process.env.TEMP_VOLUME_NAME;
+  const sec = Math.max(1, parseInt(timelimit, 10) || 2);
   
   const dockerArgs = [
     "run",
     "--rm",
+    "--log-driver=none",
     "--memory=256m",
     "--cpus=1",
     "--pids-limit=64",
@@ -129,13 +166,19 @@ const runSingleTest = async (tc, dockerPath, langConfig, timelimit) => {
     langConfig.image,
     "sh",
     "-c",
-    `timeout ${timelimit}s ${langConfig.runCmd}`
+    `timeout -s 9 ${sec} ${langConfig.runCmd}`
   );
 
-  const result = await runDocker(dockerArgs, tc.input);
+  const maxWaitMs = (sec + 3) * 1000;
+  const result = await runDocker(dockerArgs, tc.input, maxWaitMs);
 
-  // ⏱️ Timeout
-  if (result.code === 124) {
+  // ⏱️ Timeout / Killed by signal
+  if (
+    result.code === 124 ||
+    result.code === 137 ||
+    result.code === 143 ||
+    result.stderr?.includes("Time Limit Exceeded")
+  ) {
     return {
       verdict: "TLE",
       input: tc.input
