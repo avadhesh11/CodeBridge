@@ -1,7 +1,10 @@
 import axios from "axios";
 
+const rawBackendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const cleanBackendUrl = rawBackendUrl.replace(/\/+$/, "");
+
 const client = axios.create({
-  baseURL: `${import.meta.env.VITE_BACKEND_URL}/api/`,
+  baseURL: `${cleanBackendUrl}/api`,
   withCredentials: true
 });
 
@@ -17,7 +20,7 @@ client.interceptors.response.use(
       originalRequest._retry = true;
 
       await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/auth/refresh`,
+        `${cleanBackendUrl}/api/auth/refresh`,
         {},
         { withCredentials: true }
       );
