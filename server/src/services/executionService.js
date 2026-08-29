@@ -349,7 +349,8 @@ export const executionWorker = new Worker(
   },
   {
     connection: createRedisConnection("worker"),
-    concurrency: 5
+    concurrency: 5,
+    skipVersionCheck: true
   }
 );
 
