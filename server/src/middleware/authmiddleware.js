@@ -6,12 +6,11 @@ const ACCESS_SECRET = process.env.ACCESS_SECRET || "ava";
 
 const authMiddleware = async (req, res, next) => {
   try {
-    const token = req.cookies.accessToken;
+    const authHeader = req.headers.authorization;
+    const token = req.cookies?.accessToken || (authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null);
 
     if (!token) {
-      console.log("no token found");
       throw new apiError(401, "Unauthorized");
-      
     }
 
     const decoded = jwt.verify(token, ACCESS_SECRET);

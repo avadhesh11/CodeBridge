@@ -8,61 +8,58 @@ try {
     if(!name || !email || !password){
         return res.status(400).json({message:"All fields are required"});
     }
-   const user=await authServices.signup(name,email,password);
-    res.cookie("accessToken", user.accessToken, {
+    const user = await authServices.signup(name, email, password);
+    const cookieOpts = {
       httpOnly: true,
-      secure: false, // false for local development
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days for testinggg
-    });
+      secure: true,
+      sameSite: "none",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    };
 
+    res.cookie("accessToken", user.accessToken, cookieOpts);
     res.cookie("refreshToken", user.refreshToken, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      ...cookieOpts,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-return res.status(201).json({
-    message:"User created succesfully",
-    user:user.user,
-    token:user.accessToken
+    return res.status(201).json({
+      message: "User created succesfully",
+      user: user.user,
+      token: user.accessToken
+    });
 
-});
-
-} catch (error) {
+  } catch (error) {
     next(error);
-}
+  }
 }
 
 login=async(req,res,next)=>{
-try {
-    const {email,password}=req.body;
-    if( !email || !password){
-        return res.status(400).json({message:"All fields are required"});
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "All fields are required" });
     }
-   const user=await authServices.login(email,password);
-    res.cookie("accessToken", user.accessToken, {
+    const user = await authServices.login(email, password);
+    const cookieOpts = {
       httpOnly: true,
-      secure: false, // false for local development
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days for testinggg
-    });
+      secure: true,
+      sameSite: "none",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    };
 
+    res.cookie("accessToken", user.accessToken, cookieOpts);
     res.cookie("refreshToken", user.refreshToken, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      ...cookieOpts,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-return res.status(201).json({
-    message:"User logged in succesfully",
-    user:user.user,
-    token:user.accessToken
-});
+    return res.status(200).json({
+      message: "User logged in succesfully",
+      user: user.user,
+      token: user.accessToken
+    });
 
-} catch (error) {
+  } catch (error) {
     next(error);
 }
 }

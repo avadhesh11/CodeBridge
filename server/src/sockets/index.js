@@ -21,21 +21,16 @@ const io=new Server(server,{
 
 io.use((socket, next) => {
   try {
-
     const cookies = cookie.parse(socket.handshake.headers.cookie || "");
-
-    const token = cookies.accessToken;
+    const token = cookies.accessToken || socket.handshake.auth?.token;
 
     if (!token) {
       return next(new Error("Token not found for socket connection"));
     }
 
     const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
-
     socket.user = decoded;
-
     next();
-
   } catch (err) {
     next(new Error("Authentication error"));
   }

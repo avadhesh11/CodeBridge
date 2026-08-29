@@ -117,6 +117,7 @@ export default function AuthPage() {
         password: password.trim()
       });
       if (res.status === 200 || res.status === 201) {
+        if (res.data?.token) localStorage.setItem("token", res.data.token);
         if (res.data?.user) setUser(res.data.user);
         await fetchUser?.();
         navigate("/dashboard");
@@ -141,6 +142,7 @@ export default function AuthPage() {
         password: password.trim()
       });
       if (res.status === 200 || res.status === 201) {
+        if (res.data?.token) localStorage.setItem("token", res.data.token);
         if (res.data?.user) setUser(res.data.user);
         await fetchUser?.();
         navigate("/dashboard");

@@ -14,7 +14,7 @@ import passport from "passport";
 import fs from "fs";
 
 const app = express();
-
+app.set("trust proxy", 1);
 
 const allowedOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(",").map(s => s.trim().replace(/\/$/, ""))

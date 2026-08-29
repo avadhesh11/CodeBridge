@@ -29,12 +29,12 @@ router.post("/refresh",async (req, res) => {
   try {
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
 
-   const accessToken=generateAccessToken(decoded);
+    const accessToken=generateAccessToken(decoded);
     res.cookie("accessToken", accessToken, {
       httpOnly: true,
-      secure: false, // make it true for productionnnn
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days for testinggg
+      secure: true,
+      sameSite: "none",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     res.json({ success: true });
