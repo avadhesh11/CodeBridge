@@ -1107,14 +1107,6 @@ export default function InterviewPage() {
           </div>
         </div>
 
-        {submissionResult && (
-          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", marginBottom: 10 }}>
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "0.75rem", fontWeight: 700, color: submissionResult === "AC" ? "var(--green)" : "var(--red)" }}>
-              {submissionResult === "AC" ? "Accepted ✅" : submissionResult}
-            </div>
-          </div>
-        )}
-
         {/* RIGHT PANEL: VIDEO & CHAT (INTERVIEW MODE ONLY) */}
         {roomMode !== "practice" && (
           <div className="video-panel">

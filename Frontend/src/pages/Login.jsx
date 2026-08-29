@@ -99,7 +99,7 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (user) {
-      navigate("/dashboard");
+      navigate("/");
     }
   }, [user, navigate]);
 
@@ -120,7 +120,7 @@ export default function AuthPage() {
         if (res.data?.token) localStorage.setItem("token", res.data.token);
         if (res.data?.user) setUser(res.data.user);
         await fetchUser?.();
-        navigate("/dashboard");
+        navigate("/");
       }
     } catch (error) {
       setErrorMsg(error.response?.data?.message || "Error occurred during sign up. Please try again.");
@@ -145,7 +145,7 @@ export default function AuthPage() {
         if (res.data?.token) localStorage.setItem("token", res.data.token);
         if (res.data?.user) setUser(res.data.user);
         await fetchUser?.();
-        navigate("/dashboard");
+        navigate("/");
       }
     } catch (error) {
       setErrorMsg(error.response?.data?.message || "Invalid email or password.");
