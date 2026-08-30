@@ -661,8 +661,8 @@ export default function InterviewPage() {
     } catch (err) {
       // Handle 429 rate limit response
       if (err?.response?.status === 429) {
-        const retryAfter = err.response.data?.retryAfter || 60;
-        const msg = `⏳ Rate limit: please wait ${retryAfter}s before running again.`;
+        const retryAfter = err.response.data?.retryAfter || 10;
+        const msg = `⏳ Too fast! You can only Run once every 10 seconds. Wait ${retryAfter}s.`;
         setRateLimitMsg(msg);
         setVerdict({ status: "error", title: "Rate Limited", output: msg, error: null, results: [] });
       } else {
@@ -700,7 +700,7 @@ export default function InterviewPage() {
       // Handle 429 rate limit response
       if (err?.response?.status === 429) {
         const retryAfter = err.response.data?.retryAfter || 60;
-        const msg = `⏳ Rate limit: please wait ${retryAfter}s before submitting again.`;
+        const msg = `⏳ Too fast! You can only Submit once every 60 seconds. Wait ${retryAfter}s.`;
         setRateLimitMsg(msg);
         setVerdict({ status: "error", title: "Rate Limited", output: msg, error: null });
       } else {

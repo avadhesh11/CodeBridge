@@ -4,39 +4,40 @@ const rateLimitRedis = createRedisConnection("ratelimit");
 
 /**
  * Rate limiter middleware for code execution.
- * Allows MAX_REQUESTS per user within WINDOW_SECONDS.
  *
- * Key: ratelimit:exec:{userId}
+ * Two separate limits keyed by type:
+ *   - "sample" (Run button)  → 1 request per user per 10 seconds
+ *   - "hidden" (Submit button) → 1 request per user per 60 seconds
  */
-const MAX_REQUESTS = 1;
-const WINDOW_SECONDS = 60;
+const LIMITS = {
+  sample: { max: 1, windowSec: 10,  label: "run" },
+  hidden: { max: 1, windowSec: 60,  label: "submit" },
+};
 
 const executionRateLimiter = async (req, res, next) => {
   try {
     const userId = req.user?._id?.toString();
+    if (!userId) return next();
 
-    if (!userId) {
-      // No user — let auth middleware handle it
-      return next();
-    }
+    const type = req.body?.type === "hidden" ? "hidden" : "sample";
+    const { max, windowSec, label } = LIMITS[type];
 
-    const key = `ratelimit:exec:${userId}`;
+    const key = `ratelimit:exec:${type}:${userId}`;
 
     // Atomically increment and get the new count
     const count = await rateLimitRedis.incr(key);
 
     if (count === 1) {
       // First request in window — set expiry
-      await rateLimitRedis.expire(key, WINDOW_SECONDS);
+      await rateLimitRedis.expire(key, windowSec);
     }
 
-    if (count > MAX_REQUESTS) {
-      // Find how many seconds remain before the window resets
+    if (count > max) {
       const ttl = await rateLimitRedis.ttl(key);
       return res.status(429).json({
         success: false,
-        message: `Rate limit exceeded. You can only submit once every ${WINDOW_SECONDS} seconds.`,
-        retryAfter: ttl > 0 ? ttl : WINDOW_SECONDS,
+        message: `Rate limit exceeded. You can only ${label} once every ${windowSec} second${windowSec > 1 ? "s" : ""}.`,
+        retryAfter: ttl > 0 ? ttl : windowSec,
       });
     }
 
