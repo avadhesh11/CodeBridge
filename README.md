@@ -170,6 +170,7 @@ CodeBridge/
 | `POST` | `/api/auth/signup` | Create a new user profile | No |
 | `POST` | `/api/auth/login` | Login user, receives Access & Refresh tokens | No |
 | `POST` | `/api/auth/refresh` | Re-issue Access Token using Refresh Token cookie | No |
+| `POST` | `/api/auth/logout` | Terminate session and clear authentication tokens | No |
 | `PUT` | `/api/auth/profile` | Update user metadata (bio, skills, etc.) | Yes |
 
 ### 🔑 Room Module (`/api/room`)

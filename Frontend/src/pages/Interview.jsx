@@ -189,6 +189,10 @@ export default function InterviewPage() {
   const [verdict, setVerdict] = useState({ status: "idle", output: "", error: null });
   const [selectedCaseIndex, setSelectedCaseIndex] = useState(0);
   const [submissionResult, setSubmissionResult] = useState(null);
+  // Guards: prevent multiple in-flight requests from rapid clicks
+  const [isRunning, setIsRunning] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [rateLimitMsg, setRateLimitMsg] = useState("");
   const [chatMsg, setChatMsg] = useState("");
   const [messages, setMessages] = useState([]);
   const [role, setRole] = useState(null);
@@ -628,7 +632,11 @@ export default function InterviewPage() {
   };
 
   const handleRun = async () => {
+    // Guard: if a run is already in-flight, ignore extra clicks entirely
+    if (isRunning || isSubmitting) return;
     if (!questions) return;
+    setIsRunning(true);
+    setRateLimitMsg("");
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
@@ -650,13 +658,28 @@ export default function InterviewPage() {
           results: results || []
         });
       }
-    } catch {
-      setVerdict({ status: "error", title: "Execution Error", output: "Execution failed on sandbox server.", error: "Execution failed", results: [] });
+    } catch (err) {
+      // Handle 429 rate limit response
+      if (err?.response?.status === 429) {
+        const retryAfter = err.response.data?.retryAfter || 60;
+        const msg = `⏳ Rate limit: please wait ${retryAfter}s before running again.`;
+        setRateLimitMsg(msg);
+        setVerdict({ status: "error", title: "Rate Limited", output: msg, error: null, results: [] });
+      } else {
+        setVerdict({ status: "error", title: "Execution Error", output: "Execution failed on sandbox server.", error: "Execution failed", results: [] });
+      }
+    } finally {
+      // Always re-enable the button — even if request errored
+      setIsRunning(false);
     }
   };
 
   const handleSubmit = async () => {
+    // Guard: if a submission is already in-flight, ignore extra clicks entirely
+    if (isSubmitting || isRunning) return;
     if (!questions) return;
+    setIsSubmitting(true);
+    setRateLimitMsg("");
     setOutputTab("output");
     setVerdict({ status: "running", output: "", error: null });
     try {
@@ -673,8 +696,19 @@ export default function InterviewPage() {
       }
       setSubmissionResult(verdict);
       fetchRoomDetails();
-    } catch {
-      setVerdict({ status: "error", error: "Submission failed" });
+    } catch (err) {
+      // Handle 429 rate limit response
+      if (err?.response?.status === 429) {
+        const retryAfter = err.response.data?.retryAfter || 60;
+        const msg = `⏳ Rate limit: please wait ${retryAfter}s before submitting again.`;
+        setRateLimitMsg(msg);
+        setVerdict({ status: "error", title: "Rate Limited", output: msg, error: null });
+      } else {
+        setVerdict({ status: "error", error: "Submission failed" });
+      }
+    } finally {
+      // Always re-enable the button — even if request errored
+      setIsSubmitting(false);
     }
   };
 
@@ -877,8 +911,24 @@ export default function InterviewPage() {
             </div>
 
             <div className="editor-spacer" />
-            <button className="run-btn" onClick={handleRun}>▷ Run</button>
-            <button className="submit-btn" onClick={handleSubmit}>Submit</button>
+            <button
+              className="run-btn"
+              id="btn-run-code"
+              onClick={handleRun}
+              disabled={isRunning || isSubmitting}
+              style={{ opacity: (isRunning || isSubmitting) ? 0.5 : 1, cursor: (isRunning || isSubmitting) ? "not-allowed" : "pointer" }}
+            >
+              {isRunning ? "⧗ Running…" : "▷ Run"}
+            </button>
+            <button
+              className="submit-btn"
+              id="btn-submit-code"
+              onClick={handleSubmit}
+              disabled={isRunning || isSubmitting}
+              style={{ opacity: (isRunning || isSubmitting) ? 0.5 : 1, cursor: (isRunning || isSubmitting) ? "not-allowed" : "pointer" }}
+            >
+              {isSubmitting ? "⧗ Submitting…" : "Submit"}
+            </button>
             <button className="run-btn" style={{ background: "rgba(248,81,73,0.15)", color: "var(--red)", borderColor: "rgba(248,81,73,0.3)" }} onClick={reset}>Reset Layout</button>
           </div>
 

@@ -6,7 +6,9 @@ import pLimit from "p-limit";
 import { Worker } from "bullmq";
 import { connection, createRedisConnection } from "./queueService.js";
 
-const limit = pLimit(5);
+// Keep testcase parallelism low — each Docker run consumes ~80-100MB RAM.
+// concurrency=2 means at most 2 testcases run in parallel per job (safe for 512MB containers).
+const limit = pLimit(2);
 
 const isWindows = process.platform === "win32";
 
@@ -14,9 +16,9 @@ const configs = {
   "C++": {
     filename: "main.cpp",
     image: "frolvlad/alpine-gxx:latest",
-    compileCmd: "g++ main.cpp -o main",
+    compileCmd: "g++ -O2 main.cpp -o main",  // -O2 makes compiled binary run faster
     runCmd: "./main",
-    nativeCompileCmd: isWindows ? "g++ main.cpp -o main.exe" : "g++ main.cpp -o main",
+    nativeCompileCmd: isWindows ? "g++ -O2 main.cpp -o main.exe" : "g++ -O2 main.cpp -o main",
     nativeRunCmd: isWindows ? ".\\main.exe" : "./main"
   },
   "Python": {
@@ -31,9 +33,9 @@ const configs = {
     filename: "Main.java",
     image: "openjdk:17-jdk-slim",
     compileCmd: "javac Main.java",
-    runCmd: "java Main",
+    runCmd: "java -client Main",  // -client flag starts JVM faster (skips server JIT warmup)
     nativeCompileCmd: "javac Main.java",
-    nativeRunCmd: "java Main"
+    nativeRunCmd: "java -client Main"
   },
   "JavaScript": {
     filename: "main.js",
@@ -42,6 +44,26 @@ const configs = {
     runCmd: "node main.js",
     nativeCompileCmd: null,
     nativeRunCmd: "node main.js"
+  }
+};
+
+// ---------------- IMAGE PRE-WARMER ----------------
+// Run once at startup so the first user doesn't pay the image-pull/layer-unpack cost.
+// docker run --rm <image> true  -->  starts + immediately exits; warms the image cache.
+export const prewarmDockerImages = async () => {
+  const docker = await isDockerAvailable();
+  if (!docker) return;
+
+  const images = [...new Set(Object.values(configs).map((c) => c.image))];
+  console.log("[Prewarm] Warming Docker images:", images);
+
+  for (const image of images) {
+    try {
+      await runProcess("docker", ["run", "--rm", "--log-driver=none", image, "true"], "", 60000);
+      console.log(`[Prewarm] ✅ ${image} ready`);
+    } catch {
+      console.warn(`[Prewarm] ⚠️ Could not warm ${image}`);
+    }
   }
 };
 
@@ -55,10 +77,12 @@ const MAX_OUTPUT_SIZE = 1024 * 1024; // 1 MB limit to prevent output flooding
 // ---------------- DOCKER DAEMON CHECK ----------------
 let isDockerAvailableCache = null;
 let lastDockerCheck = 0;
+// Cache for 5 minutes — avoids spawning a "docker info" subprocess before every single job
+const DOCKER_CHECK_TTL_MS = 5 * 60 * 1000;
 
 const isDockerAvailable = async () => {
   const now = Date.now();
-  if (isDockerAvailableCache !== null && now - lastDockerCheck < 30000) {
+  if (isDockerAvailableCache !== null && now - lastDockerCheck < DOCKER_CHECK_TTL_MS) {
     return isDockerAvailableCache;
   }
   return new Promise((resolve) => {
@@ -195,9 +219,10 @@ const runSingleTest = async (tc, tempDir, langConfig, timelimit, useDocker) => {
       "run",
       "--rm",
       "--log-driver=none",
-      "--memory=256m",
-      "--cpus=1",
-      "--pids-limit=64",
+      "--memory=128m",       // Reduced from 256m — leaves headroom on 512MB hosts
+      "--memory-swap=128m",  // Disable swap to fail fast instead of thrashing
+      "--cpus=0.5",          // Limit CPU to half a core per container
+      "--pids-limit=32",
       "--network=none",
       "--read-only",
       "--tmpfs",
@@ -283,6 +308,26 @@ const evaluateParallel = async (testcases, tempDir, langConfig, timelimit, useDo
   return { verdict, results };
 };
 
+// ---------------- FAIL-FAST SEQUENTIAL EVALUATION ----------------
+// Stops at the first failing testcase instead of running all of them.
+// This is faster in practice: most wrong solutions fail on TC1.
+const evaluateFailFast = async (testcases, tempDir, langConfig, timelimit, useDocker) => {
+  const results = [];
+
+  for (const tc of testcases) {
+    // eslint-disable-next-line no-await-in-loop
+    const res = await runSingleTest(tc, tempDir, langConfig, timelimit, useDocker);
+    results.push(res);
+
+    // Stop immediately on TLE / RE / WA
+    if (res.verdict === "TLE") return { verdict: "TLE", results: [] };
+    if (res.verdict === "RE")  return { verdict: "RE", error: res.error, results };
+    if (res.status === "WA")   return { verdict: "WA", results };
+  }
+
+  return { verdict: "AC", results };
+};
+
 // ---------------- MAIN JUDGE ----------------
 const runJudge = async (testcases, code, language = "C++", timelimit = 2) => {
   const langConfig = configs[language] || configs["C++"];
@@ -312,8 +357,11 @@ const runJudge = async (testcases, code, language = "C++", timelimit = 2) => {
       };
     }
 
-    // ⚡ Parallel Execution
-    return await evaluateParallel(testcases, tempDir, langConfig, timelimit, useDocker);
+    // ⚡ Fail-fast evaluation: stops at first wrong/TLE/RE testcase.
+    // For sample runs (small TC count) this gives snappier feedback.
+    // For hidden runs (AC needed on all TCs) fail-fast is also correct since
+    // we report WA/TLE/RE anyway.
+    return await evaluateFailFast(testcases, tempDir, langConfig, timelimit, useDocker);
 
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -336,11 +384,15 @@ export const runHidden = async ({ testcases, timelimit }, code, language = "C++"
 };
 
 // ---------------- BULLMQ WORKER ----------------
+// ⚠️  concurrency: 1 is intentional.
+// Each job spawns Docker containers. With concurrency > 1 on a 512MB host (Render free tier),
+// you risk OOM-killing the entire service. One job at a time = stable execution.
 export const executionWorker = new Worker(
   "executionQueue",
   async (job) => {
     const { testcases, code, language, timelimit } = job.data;
     try {
+      console.log(`[Worker] Processing job ${job.id} — lang=${language}, tcs=${testcases?.length}`);
       return await runJudge(testcases, code, language, timelimit);
     } catch (err) {
       console.error("🔥 Worker execution crashed:", err);
@@ -349,8 +401,9 @@ export const executionWorker = new Worker(
   },
   {
     connection: createRedisConnection("worker"),
-    concurrency: 5,
-    skipVersionCheck: true
+    concurrency: 1,   // ONE job at a time — prevents Docker OOM on low-memory hosts
+    skipVersionCheck: true,
+    lockDuration: 120_000,  // 2-minute lock — covers even the slowest compilations
   }
 );
 
