@@ -23,11 +23,14 @@ const allowedOrigins = process.env.FRONTEND_URL
 app.use(
   cors({
     origin: (origin, callback) => {
-      // allow requests with no origin (like mobile apps or curl) or if origin is allowed
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+      // Allow requests with no origin (curl, mobile, server-to-server)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      return callback(null, true); // Permissive in deployment to prevent CORS block
+
+      return callback(new Error(`CORS: Origin '${origin}' is not allowed`), false);
     },
     credentials: true
   })
@@ -99,12 +102,23 @@ const seedQuestions = async () => {
 };
 
 const mongo = async () => {
+  const uri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/codebridge";
   try {
-    await mongoose.connect(process.env.MONGO_URI);
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
     console.log("MongoDB connected");
     await seedQuestions();
   } catch (err) {
-    console.error("MongoDB connection error:", err);
+    console.warn("Primary MongoDB connection warning:", err.message);
+    if (!uri.includes("127.0.0.1") && !uri.includes("localhost")) {
+      try {
+        console.log("Connecting to fallback local MongoDB (127.0.0.1:27017)...");
+        await mongoose.connect("mongodb://127.0.0.1:27017/codebridge", { serverSelectionTimeoutMS: 4000 });
+        console.log("MongoDB connected (local fallback)");
+        await seedQuestions();
+      } catch (localErr) {
+        console.error("Local fallback MongoDB connection error:", localErr.message);
+      }
+    }
   }
 };
 mongo();

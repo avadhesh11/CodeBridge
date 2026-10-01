@@ -208,6 +208,13 @@ export default function InterviewPage() {
   const [interviewerDecisionPopup, setInterviewerDecisionPopup] = useState(false);
   const [warningMessage, setWarningMessage] = useState("");
   const [fullscreenViolations, setFullscreenViolations] = useState(0);
+  const [antiCheatLogs, setAntiCheatLogs] = useState([]);
+  const [showProctorAudit, setShowProctorAudit] = useState(false);
+  const [lastViolationReason, setLastViolationReason] = useState("");
+  const [latestViolationAlert, setLatestViolationAlert] = useState(null);
+  // In-app toast for socket events (replaces browser alert())
+  const [socketToast, setSocketToast] = useState(null); // { msg, type: 'error'|'info' }
+
 
   // Live Timer Countdown Effect
   useEffect(() => {
@@ -376,8 +383,10 @@ export default function InterviewPage() {
     }
   };
 
-  const sendCandidateWarning = () => {
-    socket.emit("interviewer-warn-candidate");
+  const sendCandidateWarning = (customMsg) => {
+    socket.emit("interviewer-warn-candidate", {
+      message: customMsg || "⚠ Interviewer Warning: Please maintain focus on the interview window and fullscreen mode."
+    });
     setInterviewerDecisionPopup(false);
   };
 
@@ -385,27 +394,130 @@ export default function InterviewPage() {
     setInterviewerDecisionPopup(false);
   };
 
-  // Fullscreen only enforced in interview mode for candidate
+  const disqualifyCandidate = () => {
+    if (window.confirm("Are you sure you want to disqualify this candidate and terminate the interview session?")) {
+      socket.emit("interviewer-disqualify-candidate", {
+        reason: "The interview was terminated by the proctor due to integrity violations."
+      });
+      setInterviewerDecisionPopup(false);
+      setShowProctorAudit(false);
+    }
+  };
+
+  // Fullscreen enforcement on mount for candidate
   useEffect(() => {
     if (roomMode === "practice" || role !== "candidate") return;
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       enterSecureFullscreen();
     }, 1000);
+    return () => clearTimeout(timer);
   }, [role, roomMode]);
 
+  // Robust, bypass-proof candidate proctoring monitor
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      if (roomMode === "practice" || role !== "candidate") return;
+    if (roomMode === "practice" || role !== "candidate") return;
 
-      if (!document.fullscreenElement) {
-        setCandidateFullscreenWarning(true);
-        socket.emit("candidate-left-fullscreen");
-        setFullscreenViolations(prev => prev + 1);
+    let lastViolationTime = 0;
+    const reportViolation = (eventType, details) => {
+      const now = Date.now();
+      // Debounce bursts within 500ms
+      if (now - lastViolationTime < 500) return;
+      lastViolationTime = now;
+
+      setLastViolationReason(details);
+      setCandidateFullscreenWarning(true);
+      setFullscreenViolations(prev => prev + 1);
+
+      socket.emit("anti-cheat-violation", {
+        event: eventType,
+        details,
+        severity: "violation"
+      });
+    };
+
+    // 1. Fullscreen exit detection
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      if (!isFullscreen) {
+        reportViolation("FULLSCREEN_EXIT", "Candidate exited fullscreen view");
       }
     };
 
+    // 2. Tab switch / Window minimization detection
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        reportViolation("TAB_SWITCH", "Candidate switched away from the interview tab or minimized browser");
+      }
+    };
+
+    // 3. Loss of window focus (dual monitors, alt-tab, clicking external apps)
+    const handleWindowBlur = () => {
+      reportViolation("WINDOW_BLUR", "Candidate focused outside the interview window (alt-tab / secondary monitor)");
+    };
+
+    // 4. Block Developer Tools & Inspection shortcuts
+    const handleKeyDown = (e) => {
+      const isDevKey =
+        e.key === "F12" ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "i", "J", "j", "C", "c"].includes(e.key)) ||
+        ((e.ctrlKey || e.metaKey) && ["U", "u"].includes(e.key));
+
+      if (isDevKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        reportViolation("DEVTOOLS_ATTEMPT", `Attempted developer inspection shortcut: ${e.key}`);
+      }
+    };
+
+    // 5. Block right-click context menu (Inspect Element)
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+    };
+
+    // 6. Clipboard paste inspection (detect large external code injections)
+    const handlePaste = (e) => {
+      const pasted = e.clipboardData?.getData("text") || "";
+      if (pasted.length > 50) {
+        reportViolation("SUSPICIOUS_PASTE", `Large clipboard insertion detected (${pasted.length} characters)`);
+      }
+    };
+
+    // 7. Watchdog: ensure candidate cannot stay un-fullscreened
+    const watchdog = setInterval(() => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      if (!isFullscreen) {
+        setCandidateFullscreenWarning(true);
+      }
+    }, 2000);
+
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("paste", handlePaste);
+
+    return () => {
+      clearInterval(watchdog);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("paste", handlePaste);
+    };
   }, [role, roomMode]);
 
   useEffect(() => {
@@ -413,6 +525,9 @@ export default function InterviewPage() {
 
     socket.connect();
 
+    // Remove any stale 'connect' listener before adding a new one.
+    // Without this, every time the effect re-runs it stacks another join-room call.
+    socket.off("connect");
     socket.on("connect", () => {
       socket.emit("join-room", { roomID });
     });
@@ -430,12 +545,15 @@ export default function InterviewPage() {
       if (data.currentLanguage) {
         setLanguage(data.currentLanguage);
       }
+      if (data.antiCheatLogs) setAntiCheatLogs(data.antiCheatLogs);
+      if (data.cheatViolationsCount !== undefined) setFullscreenViolations(data.cheatViolationsCount);
     });
 
     socket.on("error-message", (msg) => {
       console.log("Socket error:", msg);
-      alert(msg);
-      navigate("/dashboard");
+      // Use in-app toast instead of blocking browser alert()
+      setSocketToast({ msg, type: "error" });
+      setTimeout(() => navigate("/dashboard"), 3000);
     });
 
     socket.on("chat-history", (chats) => {
@@ -527,30 +645,49 @@ export default function InterviewPage() {
       setQuestions(question);
     });
     
-    socket.on("candidate-left-fullscreen-alert", () => {
-      if (role === "interviewer") setInterviewerDecisionPopup(true);
+    socket.on("candidate-violation-alert", (violation) => {
+      setAntiCheatLogs(prev => [violation, ...prev]);
+      setLatestViolationAlert(violation);
+      setFullscreenViolations(violation.totalViolations || ((prev) => prev + 1));
+      setInterviewerDecisionPopup(true);
     });
 
-    socket.on("candidate-warning", () => {
-      if (role === "candidate") {
-        setWarningMessage("⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.");
-        setTimeout(() => setWarningMessage(""), 5000);
+    socket.on("candidate-left-fullscreen-alert", (violation) => {
+      if (violation?.details) {
+        setLatestViolationAlert(violation);
+      }
+      setInterviewerDecisionPopup(true);
+    });
+
+    socket.on("anti-cheat-status", ({ totalViolations, lastViolation }) => {
+      setFullscreenViolations(totalViolations);
+      if (lastViolation?.details) {
+        setLastViolationReason(lastViolation.details);
       }
     });
 
+    socket.on("candidate-warning", (data) => {
+      const msg = data?.message || "⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.";
+      setWarningMessage(msg);
+      setTimeout(() => setWarningMessage(""), 6000);
+    });
+
     socket.on("session-ended", (data) => {
-      alert(data?.reason || "The room session has been ended.");
-      navigate("/dashboard");
+      const msg = data?.reason || "The room session has been ended.";
+      setSocketToast({ msg, type: "info" });
+      setTimeout(() => navigate("/dashboard"), 3000);
     });
 
     return () => {
-      ["joined-successfully", "error-message", "code-update", "language-update", "candidate-left-fullscreen-alert", "candidate-warning", "question-selected",
+      socket.off("connect");
+      ["joined-successfully", "error-message", "code-update", "language-update",
+        "candidate-left-fullscreen-alert", "candidate-violation-alert", "anti-cheat-status", "candidate-warning", "question-selected",
         "chat", "chat-history", "webrtc-offer", "webrtc-answer", "webrtc-ice",
         "start-call", "screen-share-start", "screen-share-stop", "session-ended"
       ].forEach(e => socket.off(e));
       socket.disconnect();
     };
-  }, [roomID, role, navigate]);
+  }, [roomID]);
 
   const handleEndSession = () => {
     if (roomMode === "practice") {
@@ -730,6 +867,32 @@ export default function InterviewPage() {
     <>
       <style>{styles}</style>
 
+      {/* Socket event toast — replaces browser alert() */}
+      {socketToast && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(8,12,16,0.85)", display: "flex",
+          alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{
+            background: socketToast.type === "error" ? "rgba(248,81,73,0.15)" : "rgba(57,211,83,0.12)",
+            border: `1px solid ${socketToast.type === "error" ? "rgba(248,81,73,0.4)" : "rgba(57,211,83,0.4)"}`,
+            borderRadius: 12, padding: "24px 32px", maxWidth: 440, textAlign: "center",
+            fontFamily: "'Syne', sans-serif"
+          }}>
+            <div style={{ fontSize: "2rem", marginBottom: 10 }}>
+              {socketToast.type === "error" ? "⛔" : "✅"}
+            </div>
+            <div style={{ color: "var(--text)", fontWeight: 700, fontSize: "1rem", marginBottom: 8 }}>
+              {socketToast.msg}
+            </div>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+              Redirecting to dashboard in 3 seconds…
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-logo" onClick={() => navigate("/dashboard")}>
@@ -782,6 +945,54 @@ export default function InterviewPage() {
         <div className="topbar-spacer" />
 
         <div className="topbar-actions">
+          {/* Proctoring Badges & Controls */}
+          {roomMode !== "practice" && role === "interviewer" && (
+            <button
+              className="topbar-btn"
+              style={{
+                background: fullscreenViolations > 0 ? "rgba(248,81,73,0.18)" : "rgba(56,139,253,0.12)",
+                color: fullscreenViolations > 0 ? "#f85149" : "#58a6ff",
+                border: `1px solid ${fullscreenViolations > 0 ? "rgba(248,81,73,0.4)" : "rgba(56,139,253,0.3)"}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                fontWeight: 700,
+                cursor: "pointer"
+              }}
+              onClick={() => setShowProctorAudit(true)}
+              title="View Real-Time Anti-Cheat Proctoring Logs"
+            >
+              <span>🛡️ Proctor Log</span>
+              <span style={{
+                background: fullscreenViolations > 0 ? "#f85149" : "#30363d",
+                color: "white",
+                borderRadius: "10px",
+                padding: "1px 7px",
+                fontSize: "0.75rem"
+              }}>
+                {fullscreenViolations}
+              </span>
+            </button>
+          )}
+
+          {roomMode !== "practice" && role === "candidate" && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 12px",
+              borderRadius: 8,
+              background: fullscreenViolations > 0 ? "rgba(248,81,73,0.15)" : "rgba(35,134,54,0.15)",
+              border: `1px solid ${fullscreenViolations > 0 ? "rgba(248,81,73,0.4)" : "rgba(35,134,54,0.4)"}`,
+              color: fullscreenViolations > 0 ? "#f85149" : "#3fb950",
+              fontSize: "0.8rem",
+              fontWeight: 700
+            }}>
+              <span>{fullscreenViolations > 0 ? "⚠️" : "🛡️"}</span>
+              <span>{fullscreenViolations > 0 ? `Violations: ${fullscreenViolations}` : "Proctored Mode"}</span>
+            </div>
+          )}
+
           {roomMode !== "practice" && (
             <button className="topbar-btn btn-screen" onClick={screenSharing ? stopScreenShare : startScreenShare}>
               {screenSharing ? "Stop Sharing" : "Start Screen Share"}
@@ -1220,71 +1431,275 @@ export default function InterviewPage() {
           </div>
         )}
 
-        {/* Interview anti-cheat candidate forced fullscreen warning */}
-        {roomMode !== "practice" && candidateFullscreenWarning && (
+        {/* Interview anti-cheat candidate forced fullscreen & integrity lockdown */}
+        {roomMode !== "practice" && role === "candidate" && candidateFullscreenWarning && (
           <div style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.85)",
-            zIndex: 9999,
+            background: "rgba(5, 7, 10, 0.94)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            zIndex: 99999,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
+            padding: 20
           }}>
             <div style={{
-              background: "#111",
-              border: "1px solid red",
-              borderRadius: "12px",
-              padding: "30px",
+              background: "#0d1117",
+              border: "1px solid rgba(248, 81, 73, 0.6)",
+              boxShadow: "0 0 40px rgba(248, 81, 73, 0.25)",
+              borderRadius: "16px",
+              padding: "36px",
               textAlign: "center",
-              width: "420px"
+              maxWidth: "480px",
+              width: "100%",
+              fontFamily: "'Syne', sans-serif"
             }}>
-              <h2 style={{ color: "red", marginBottom: "12px" }}>Secure Interview Mode Exited</h2>
-              <p style={{ color: "#aaa", marginBottom: "20px" }}>
-                You left fullscreen interview mode. Please re-enter immediately for fairness.
+              <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>🚨</div>
+              <h2 style={{ color: "#f85149", margin: "0 0 10px 0", fontSize: "1.4rem", fontWeight: 800 }}>
+                Integrity Violation Detected
+              </h2>
+              <div style={{
+                background: "rgba(248, 81, 73, 0.1)",
+                border: "1px solid rgba(248, 81, 73, 0.3)",
+                borderRadius: "8px",
+                padding: "10px 14px",
+                color: "#ff7b72",
+                fontSize: "0.88rem",
+                marginBottom: 16,
+                fontWeight: 600
+              }}>
+                {lastViolationReason || "You navigated away from the proctored interview environment."}
+              </div>
+              <p style={{ color: "#8b949e", fontSize: "0.85rem", lineHeight: 1.5, marginBottom: 20 }}>
+                CodeBridge proctoring engine monitors fullscreen status, tab switches, window focus, developer shortcuts, and clipboard activity. All events are time-stamped and sent directly to the interviewer's audit log.
               </p>
-              <button
-                onClick={() => {
-                  enterSecureFullscreen();
-                  setCandidateFullscreenWarning(false);
-                }}
-                style={{
-                  padding: "10px 22px",
-                  background: "red",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  cursor: "pointer"
-                }}
-              >
-                Re-enter Fullscreen
-              </button>
+              <div style={{
+                display: "inline-block",
+                padding: "4px 12px",
+                background: "rgba(248,81,73,0.15)",
+                borderRadius: 20,
+                color: "#f85149",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                marginBottom: 24
+              }}>
+                Recorded Strikes: {fullscreenViolations}
+              </div>
+              <div>
+                <button
+                  onClick={() => {
+                    enterSecureFullscreen();
+                    setCandidateFullscreenWarning(false);
+                  }}
+                  style={{
+                    padding: "12px 28px",
+                    background: "linear-gradient(135deg, #f85149, #da3633)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "10px",
+                    fontWeight: 700,
+                    fontSize: "0.95rem",
+                    cursor: "pointer",
+                    boxShadow: "0 4px 14px rgba(248, 81, 73, 0.4)",
+                    transition: "transform 0.15s ease"
+                  }}
+                >
+                  Re-enter Secure Fullscreen
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* Interviewer decision popup */}
-        {roomMode !== "practice" && interviewerDecisionPopup && (
+        {roomMode !== "practice" && role === "interviewer" && interviewerDecisionPopup && (
           <div style={{
             position: "fixed",
-            top: "20px",
-            right: "20px",
+            top: "24px",
+            right: "24px",
             background: "#161b22",
-            border: "1px solid orange",
-            borderRadius: "10px",
-            padding: "18px",
+            border: "1px solid rgba(248, 81, 73, 0.5)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            borderRadius: "12px",
+            padding: "20px",
             zIndex: 9999,
-            width: "320px"
+            width: "360px",
+            fontFamily: "'Syne', sans-serif"
           }}>
-            <div style={{ color: "orange", fontWeight: 800, marginBottom: "10px" }}>
-              Candidate left fullscreen mode.
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#f85149", fontWeight: 800, fontSize: "0.95rem" }}>
+                <span>⚠️</span>
+                <span>Proctoring Alert</span>
+              </div>
+              <span style={{
+                background: "rgba(248,81,73,0.2)",
+                color: "#f85149",
+                borderRadius: "10px",
+                padding: "2px 8px",
+                fontSize: "0.75rem",
+                fontWeight: 700
+              }}>
+                Strike #{fullscreenViolations}
+              </span>
             </div>
-            <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "14px" }}>
-              Ask candidate to re-enter secure mode?
+
+            <div style={{ color: "#c9d1d9", fontSize: "0.85rem", marginBottom: 8, fontWeight: 600 }}>
+              {latestViolationAlert?.event ? `[${latestViolationAlert.event}]` : "INTEGRITY_VIOLATION"}
             </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={sendCandidateWarning} style={{ flex: 1, padding: "8px", background: "orange", border: "none", borderRadius: "6px", cursor: "pointer" }}>Warn Candidate</button>
-              <button onClick={ignoreCandidateViolation} style={{ flex: 1, padding: "8px", background: "#333", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>Leave This Time</button>
+            <div style={{ color: "#8b949e", fontSize: "0.8rem", marginBottom: 16 }}>
+              {latestViolationAlert?.details || "Candidate exited fullscreen or switched window focus."}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => sendCandidateWarning()}
+                  style={{
+                    flex: 1, padding: "8px 12px", background: "#f85149", color: "white",
+                    border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: 700, fontSize: "0.8rem"
+                  }}
+                >
+                  Warn Candidate
+                </button>
+                <button
+                  onClick={ignoreCandidateViolation}
+                  style={{
+                    flex: 1, padding: "8px 12px", background: "#21262d", color: "#c9d1d9",
+                    border: "1px solid #30363d", borderRadius: "8px", cursor: "pointer", fontSize: "0.8rem"
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => { setShowProctorAudit(true); setInterviewerDecisionPopup(false); }}
+                  style={{
+                    flex: 1, padding: "7px 10px", background: "#30363d", color: "#58a6ff",
+                    border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600
+                  }}
+                >
+                  View Audit Trail
+                </button>
+                <button
+                  onClick={disqualifyCandidate}
+                  style={{
+                    flex: 1, padding: "7px 10px", background: "rgba(248, 81, 73, 0.15)", color: "#f85149",
+                    border: "1px solid rgba(248, 81, 73, 0.4)", borderRadius: "8px", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600
+                  }}
+                >
+                  Disqualify
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Proctoring Audit Log Modal for Interviewer */}
+        {showProctorAudit && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            backdropFilter: "blur(6px)",
+            zIndex: 99998,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20
+          }}>
+            <div style={{
+              background: "#161b22",
+              border: "1px solid #30363d",
+              borderRadius: "14px",
+              padding: "24px 28px",
+              maxWidth: "680px",
+              width: "100%",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              fontFamily: "'Syne', sans-serif"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: "1.3rem" }}>🛡️</span>
+                  <div>
+                    <h3 style={{ margin: 0, color: "var(--text)", fontSize: "1.1rem" }}>
+                      Anti-Cheat & Proctoring Audit Trail
+                    </h3>
+                    <div style={{ color: "#8b949e", fontSize: "0.78rem" }}>
+                      Room ID: {roomID} • Total Logged Events: {antiCheatLogs.length}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowProctorAudit(false)}
+                  style={{ background: "none", border: "none", color: "#8b949e", fontSize: "1.2rem", cursor: "pointer" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Event Table */}
+              <div style={{ flex: 1, overflowY: "auto", border: "1px solid #30363d", borderRadius: 8, marginBottom: 18, background: "#0d1117" }}>
+                {antiCheatLogs.length === 0 ? (
+                  <div style={{ padding: "40px", textAlign: "center", color: "#8b949e", fontSize: "0.9rem" }}>
+                    ✅ No violations recorded. The candidate has stayed focused within the secure environment.
+                  </div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", textAlign: "left" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid #30363d", background: "#161b22", color: "#8b949e" }}>
+                        <th style={{ padding: "10px 14px" }}>Time</th>
+                        <th style={{ padding: "10px 14px" }}>Violation Type</th>
+                        <th style={{ padding: "10px 14px" }}>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {antiCheatLogs.map((log, idx) => {
+                        const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "Just now";
+                        return (
+                          <tr key={idx} style={{ borderBottom: "1px solid #21262d" }}>
+                            <td style={{ padding: "10px 14px", color: "#8b949e", whiteSpace: "nowrap" }}>{dateStr}</td>
+                            <td style={{ padding: "10px 14px", color: "#f85149", fontWeight: 700, whiteSpace: "nowrap" }}>
+                              {log.event || "SECURITY_ALERT"}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#c9d1d9" }}>{log.details || "Integrity violation"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ color: "#f85149", fontSize: "0.85rem", fontWeight: 700 }}>
+                  Total Strikes: {fullscreenViolations}
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    onClick={() => sendCandidateWarning()}
+                    style={{ padding: "8px 16px", background: "#f85149", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}
+                  >
+                    Send Warning
+                  </button>
+                  <button
+                    onClick={disqualifyCandidate}
+                    style={{ padding: "8px 16px", background: "rgba(248,81,73,0.15)", color: "#f85149", border: "1px solid rgba(248,81,73,0.4)", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}
+                  >
+                    Disqualify Candidate
+                  </button>
+                  <button
+                    onClick={() => setShowProctorAudit(false)}
+                    style={{ padding: "8px 16px", background: "#21262d", color: "#c9d1d9", border: "1px solid #30363d", borderRadius: 8, cursor: "pointer", fontSize: "0.82rem" }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1296,12 +1711,14 @@ export default function InterviewPage() {
             top: 0,
             left: 0,
             right: 0,
-            background: "rgba(255,0,0,0.85)",
+            background: "rgba(248,81,73,0.92)",
             color: "white",
             textAlign: "center",
             padding: "10px",
-            zIndex: 9999,
-            fontWeight: 700
+            zIndex: 99999,
+            fontWeight: 700,
+            fontFamily: "'Syne', sans-serif",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.4)"
           }}>
             {warningMessage}
           </div>

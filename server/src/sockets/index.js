@@ -1,4 +1,6 @@
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { createRedisConnection } from "../services/queueService.js";
 import registerRoom from "./roomSocket.js";
 import jwt from "jsonwebtoken";
 import cookie from "cookie";
@@ -18,6 +20,28 @@ const io=new Server(server,{
   },
   transports: ["websocket", "polling"]
 });
+
+// Configure horizontal scaling via Redis adapter
+try {
+  const pubClient = createRedisConnection("socketio-pub");
+  const subClient = pubClient.duplicate();
+  subClient.on("error", (err) => {
+    if (
+      err.code === "ECONNRESET" ||
+      err.code === "EPIPE" ||
+      err.message?.includes("ECONNRESET") ||
+      err.message?.includes("EPIPE")
+    ) {
+      return;
+    }
+    console.warn("[Redis socketio-sub] Notice:", err.message);
+  });
+
+  io.adapter(createAdapter(pubClient, subClient));
+  console.log("[Socket.io] Horizontal scaling enabled with Redis adapter");
+} catch (adapterErr) {
+  console.warn("[Socket.io] Could not initialize Redis adapter, using default in-memory adapter:", adapterErr.message);
+}
 
 io.use((socket, next) => {
   try {

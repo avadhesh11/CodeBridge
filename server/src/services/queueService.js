@@ -46,15 +46,12 @@ export const executionQueue = new Queue("executionQueue", {
   connection: createRedisConnection("queue"),
   skipVersionCheck: true,
   defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: "exponential",
-      delay: 1000,
-    },
+    attempts: 1,           // No retry — a failing Docker job wastes resources on retry
     removeOnComplete: 100,
     removeOnFail: 100
   },
 });
+
 
 export const queueEvents = new QueueEvents("executionQueue", {
   connection: createRedisConnection("events"),

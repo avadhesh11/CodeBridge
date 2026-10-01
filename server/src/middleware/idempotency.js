@@ -7,13 +7,16 @@ const idempotencyRedis = createRedisConnection("idempotency");
  * Idempotency middleware for code execution.
  *
  * Computes a deterministic hash from: userId + questionId + type + language + code.
- * - If a cached result exists for this hash → return it immediately (no Docker spawned).
- * - Otherwise → let the request proceed, then cache the response for CACHE_TTL_SECONDS.
+ * - Cache HIT  → return cached result immediately (no Docker spawned).
+ * - Cache MISS → let request proceed, then cache the response.
  *
- * This means multiple rapid clicks / simultaneous submissions of the same code
- * are treated as a single job.
+ * TTL strategy:
+ *   - AC  verdict → cached 60s  (no need to re-run a correct solution)
+ *   - Any other   → cached 5s   (just enough to deduplicate double-clicks,
+ *                                short enough that fixing code gets re-evaluated)
  */
-const CACHE_TTL_SECONDS = 60;
+const AC_TTL_SECONDS     = 60;
+const NON_AC_TTL_SECONDS = 5;
 
 const executionIdempotency = (req, res, next) => {
   try {
@@ -29,10 +32,8 @@ const executionIdempotency = (req, res, next) => {
     const hash = crypto.createHash("sha256").update(hashInput).digest("hex");
     const cacheKey = `idempotency:exec:${hash}`;
 
-    // Attach key to request so the response interceptor can cache it
     req._idempotencyKey = cacheKey;
 
-    // Check for cached result
     idempotencyRedis.get(cacheKey).then((cached) => {
       if (cached) {
         console.log(`[Idempotency] Cache HIT for key ${hash.slice(0, 8)}…`);
@@ -40,19 +41,18 @@ const executionIdempotency = (req, res, next) => {
           const parsed = JSON.parse(cached);
           return res.status(200).json({ success: true, _cached: true, ...parsed });
         } catch {
-          // Corrupt cache entry — proceed normally
-          return next();
+          return next(); // Corrupt entry — proceed normally
         }
       }
 
       // Cache MISS — intercept res.json to cache the result before sending
       const originalJson = res.json.bind(res);
       res.json = (body) => {
-        // Only cache successful execution results
         if (res.statusCode === 200 && body?.success && body?.verdict) {
           const { success: _s, _cached: _c, ...resultOnly } = body;
+          const ttl = body.verdict === "AC" ? AC_TTL_SECONDS : NON_AC_TTL_SECONDS;
           idempotencyRedis
-            .set(cacheKey, JSON.stringify(resultOnly), "EX", CACHE_TTL_SECONDS)
+            .set(cacheKey, JSON.stringify(resultOnly), "EX", ttl)
             .catch((e) => console.warn("[Idempotency] Cache write error:", e.message));
         }
         return originalJson(body);

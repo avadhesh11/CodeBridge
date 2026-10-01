@@ -50,11 +50,20 @@ createdAt: { type: Date, default: Date.now },
     }
   ], 
 questions:[{type:mongoose.Schema.Types.ObjectId,ref: "Question"}],
-currentQuestion: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Question",
-  default: null
-}
+  currentQuestion: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Question",
+    default: null
+  },
+  antiCheatLogs: [
+    {
+      event: { type: String, required: true },
+      details: { type: String, default: "" },
+      timestamp: { type: Date, default: Date.now },
+      severity: { type: String, enum: ["warning", "violation"], default: "violation" }
+    }
+  ],
+  cheatViolationsCount: { type: Number, default: 0 }
 });
 
 const roomModel = mongoose.model("Room", roomSchema);

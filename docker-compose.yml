@@ -10,15 +10,17 @@ services:
       - ACCESS_SECRET=codebridge
       - REFRESH_SECRET=codebridge
       - TEMP_VOLUME_NAME=codebridge_temp_data
+      - ENABLE_QUEUE_BOARD=true
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - BACKEND_URL=${BACKEND_URL:-http://localhost:5000}
     depends_on:
+
       - mongo
       - redis
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - temp_data:/src/services/temp
+      - temp_data:/app/temp
 
   frontend:
     build:

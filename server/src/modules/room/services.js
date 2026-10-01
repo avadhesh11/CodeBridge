@@ -121,10 +121,14 @@ runCode = async (code, questionId, type = "sample", roomID = null, userId = null
       code,
       language: language || "C++",
       timelimit
+    }, {
+      attempts: 1
     });
 
-    // Wait for worker to finish processing the job
-    const result = await job.waitUntilFinished(queueEvents);
+    // Wait for worker to complete — with a 90s timeout so the HTTP request
+    // doesn't hang forever if the worker crashes or Redis drops the job.
+    const result = await job.waitUntilFinished(queueEvents, 90_000);
+
 
     if (type === "hidden" && roomID && userId) {
       const room = await roomModel.findOne({ roomID });

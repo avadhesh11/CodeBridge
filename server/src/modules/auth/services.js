@@ -2,24 +2,28 @@ import userModel from "../../models/user.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import apiError from "../../utils/apiError.js";
-const ACCESS_SECRET = process.env.ACCESS_SECRET || "ava";
-const REFRESH_SECRET = process.env.REFRESH_SECRET || "ava";
 
-function generateAccessToken(user) {
+const ACCESS_SECRET  = process.env.ACCESS_SECRET;
+const REFRESH_SECRET = process.env.REFRESH_SECRET;
+
+if (!ACCESS_SECRET || !REFRESH_SECRET) {
+  console.error("[FATAL] ACCESS_SECRET or REFRESH_SECRET env variable is not set!");
+  // Don't crash in test/CI but log loudly
+}
+
+
+export function generateAccessToken(user) {
   return jwt.sign(
-    {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-    },
+    { id: user._id, name: user.name, email: user.email },
     ACCESS_SECRET,
     { expiresIn: "30d" }
   );
 }
 
-function generateRefreshToken(user) {
+export function generateRefreshToken(user) {
   return jwt.sign({ id: user._id }, REFRESH_SECRET, { expiresIn: "7d" });
 }
+
 
 class authServices{
 signup=async(name,email,password)=>{

@@ -3,8 +3,8 @@ import http from "http";
 import fs from "fs";
 import initSocket from "./src/sockets/index.js";
 import app from "./src/app.js";
-import "./src/services/executionService.js";
 import { prewarmDockerImages } from "./src/services/executionService.js";
+
 
 const PORT = process.env.PORT || 5000;
 

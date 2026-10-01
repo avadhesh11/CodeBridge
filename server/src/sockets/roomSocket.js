@@ -13,6 +13,11 @@ int main() {
 
 const roomSockets = {};
 
+// Tracks active expiry timers per roomID so we never register more than one.
+// Without this, every join-room (reconnect, second user joining) creates a new
+// setTimeout — all of them fire at expiry and emit session-ended N times.
+const roomTimers = {};
+
 export default function registerRoom(io, socket) {
 
   socket.on("webrtc-offer", (offer) => {
@@ -77,12 +82,16 @@ export default function registerRoom(io, socket) {
       const role = isPractice ? "practice" : (isInterviewer ? "interviewer" : "candidate");
 
       socket.join(roomID);
-      socket.roomID = roomID;
-      socket.role = role;
+      socket.roomID    = roomID;
+      socket.role      = role;
+      socket.roomDbId  = room._id;   // stored so chat handler avoids a DB lookup per message
+      // receiverId = the other participant (used by chat handler to store receiver)
+      socket.receiverId = isInterviewer ? room.candidate?.toString() : room.interviewer?.toString();
 
       if (!roomSockets[roomID]) roomSockets[roomID] = [];
       roomSockets[roomID] = roomSockets[roomID].filter(id => id !== socket.id);
       roomSockets[roomID].push(socket.id);
+
 
       const chats = await chatModel.find({ roomId: room._id }).sort({ createdAt: 1 });
       socket.emit("chat-history", chats);
@@ -111,14 +120,19 @@ export default function registerRoom(io, socket) {
         mode: room.mode || "interview",
         isTimed: room.isTimed || false,
         durationMinutes: room.durationMinutes,
-        expiresAt: room.expiresAt
+        expiresAt: room.expiresAt,
+        antiCheatLogs: room.antiCheatLogs || [],
+        cheatViolationsCount: room.cheatViolationsCount || 0
       });
 
-      // If room is timed, handle auto-expiration broadcast
-      if (room.isTimed && room.expiresAt) {
+      // If room is timed, schedule auto-expiration — but only ONCE per room.
+      // roomTimers[roomID] guard prevents duplicate timers when users reconnect or
+      // a second user joins (both would have previously created their own setTimeout).
+      if (room.isTimed && room.expiresAt && !roomTimers[roomID]) {
         const msRemaining = new Date(room.expiresAt).getTime() - Date.now();
         if (msRemaining > 0) {
-          setTimeout(async () => {
+          roomTimers[roomID] = setTimeout(async () => {
+            delete roomTimers[roomID];
             try {
               const r = await roommodel.findOne({ roomID });
               if (r && r.status === "active") {
@@ -133,12 +147,13 @@ export default function registerRoom(io, socket) {
         }
       }
 
-      const currentSockets = roomSockets[roomID];
-      console.log(`Room ${roomID} now has ${currentSockets.length} socket(s):`, currentSockets);
+      // Query connected sockets across all instances via Redis adapter
+      const socketsInRoom = await io.in(roomID).fetchSockets();
+      console.log(`Room ${roomID} now has ${socketsInRoom.length} socket(s) across instances`);
 
       // Only start WebRTC call for interview mode with 2 participants
-      if (!isPractice && currentSockets.length >= 2) {
-        console.log(`Both users in room ${roomID} — telling second joiner (${socket.id}) to start call`);
+      if (!isPractice && socketsInRoom.length >= 2) {
+        console.log(`Both users in room ${roomID} — telling joiner (${socket.id}) to start call`);
         socket.emit("start-call");
       }
 
@@ -162,18 +177,15 @@ export default function registerRoom(io, socket) {
 
   socket.on("chat", async ({ message }) => {
     try {
-      if (!socket.roomID) return socket.emit("error-message", "not inside a room");
+      if (!socket.roomID || !socket.roomDbId) {
+        return socket.emit("error-message", "not inside a room");
+      }
 
-      const room = await roommodel.findOne({ roomID: socket.roomID });
-      if (!room) return socket.emit("error-message", "Room not found");
-
-      const isInterviewer = room.interviewer.toString() === socket.user.id;
-      const receiverId = isInterviewer ? room.candidate : room.interviewer;
-
+      // Use socket state set during join-room — no DB round-trip needed.
       await chatModel.create({
-        sender: new mongoose.Types.ObjectId(socket.user.id),
-        receiver: new mongoose.Types.ObjectId(receiverId),
-        roomId: room._id,
+        sender:   new mongoose.Types.ObjectId(socket.user.id),
+        receiver: socket.receiverId ? new mongoose.Types.ObjectId(socket.receiverId) : undefined,
+        roomId:   socket.roomDbId,
         message
       });
 
@@ -222,17 +234,120 @@ export default function registerRoom(io, socket) {
       socket.emit("error-message", "Something went wrong");
     }
   });
-  socket.on("candidate-left-fullscreen", async () => {
-  const roomID = socket.roomID;
-  if (!roomID) return;
-  socket.to(roomID).emit("candidate-left-fullscreen-alert");
-});
+  // Robust Server-Side Anti-Cheat & Proctoring Engine
+  socket.on("anti-cheat-violation", async (data = {}) => {
+    try {
+      const roomID = socket.roomID;
+      if (!roomID) return;
 
-socket.on("interviewer-warn-candidate", async () => {
-  const roomID =  socket.roomID;
-  if (!roomID) return;
-  socket.to(roomID).emit("candidate-warning");
-});
+      const eventType = data.event || "SECURITY_VIOLATION";
+      const details = data.details || "Candidate triggered a proctoring violation";
+      const timestamp = new Date();
+
+      const updatedRoom = await roommodel.findOneAndUpdate(
+        { roomID },
+        {
+          $push: {
+            antiCheatLogs: {
+              event: eventType,
+              details,
+              timestamp,
+              severity: data.severity || "violation"
+            }
+          },
+          $inc: { cheatViolationsCount: 1 }
+        },
+        { new: true }
+      );
+
+      const totalViolations = updatedRoom?.cheatViolationsCount || 1;
+      const violationPayload = {
+        event: eventType,
+        details,
+        timestamp,
+        totalViolations
+      };
+
+      // Broadcast to interviewer with full audit payload
+      socket.to(roomID).emit("candidate-violation-alert", violationPayload);
+
+      // Legacy event backward compatibility
+      socket.to(roomID).emit("candidate-left-fullscreen-alert", violationPayload);
+
+      // Send candidate authoritative strike count and warning
+      socket.emit("anti-cheat-status", {
+        totalViolations,
+        lastViolation: { event: eventType, details, timestamp }
+      });
+
+      console.log(`[AntiCheat] Room ${roomID} | ${eventType} | Strikes: ${totalViolations}`);
+    } catch (err) {
+      console.error("[AntiCheat] Error logging violation:", err);
+    }
+  });
+
+  // Legacy fallback for candidate-left-fullscreen
+  socket.on("candidate-left-fullscreen", async () => {
+    const roomID = socket.roomID;
+    if (!roomID) return;
+
+    try {
+      const updatedRoom = await roommodel.findOneAndUpdate(
+        { roomID },
+        {
+          $push: {
+            antiCheatLogs: {
+              event: "FULLSCREEN_EXIT",
+              details: "Candidate exited fullscreen mode",
+              timestamp: new Date(),
+              severity: "violation"
+            }
+          },
+          $inc: { cheatViolationsCount: 1 }
+        },
+        { new: true }
+      );
+
+      const totalViolations = updatedRoom?.cheatViolationsCount || 1;
+      const violationPayload = {
+        event: "FULLSCREEN_EXIT",
+        details: "Candidate exited fullscreen mode",
+        timestamp: new Date(),
+        totalViolations
+      };
+
+      socket.to(roomID).emit("candidate-violation-alert", violationPayload);
+      socket.to(roomID).emit("candidate-left-fullscreen-alert", violationPayload);
+      socket.emit("anti-cheat-status", { totalViolations, lastViolation: violationPayload });
+    } catch (err) {
+      console.error("[AntiCheat] Legacy fullscreen error:", err);
+    }
+  });
+
+  socket.on("interviewer-warn-candidate", async (data = {}) => {
+    const roomID = socket.roomID;
+    if (!roomID) return;
+    const msg = data?.message || "⚠ Interviewer Warning: Please stay in fullscreen mode for a fair interview.";
+    socket.to(roomID).emit("candidate-warning", { message: msg });
+  });
+
+  socket.on("interviewer-disqualify-candidate", async (data = {}) => {
+    try {
+      const roomID = socket.roomID;
+      if (!roomID) return;
+      const room = await roommodel.findOne({ roomID });
+      if (!room || (room.interviewer?.toString() !== socket.user.id && room.mode !== "practice")) return;
+
+      room.status = "closed";
+      await room.save();
+
+      io.to(roomID).emit("session-ended", {
+        reason: data?.reason || "Interview was terminated by the proctor due to integrity violations."
+      });
+    } catch (err) {
+      console.error("[AntiCheat] Disqualify error:", err);
+    }
+  });
 
 socket.on("end-session", async () => {
   try {
@@ -248,17 +363,23 @@ socket.on("end-session", async () => {
       if (room.currentQuestion) {
         const qIdStr = room.currentQuestion.toString();
         const alreadyIn = room.questions.some(q => q.toString() === qIdStr);
-        if (!alreadyIn) {
-          room.questions.push(room.currentQuestion);
-        }
+        if (!alreadyIn) room.questions.push(room.currentQuestion);
       }
       await room.save();
+
+      // Cancel expiry timer — room is already closed, no need to fire later
+      if (roomTimers[roomID]) {
+        clearTimeout(roomTimers[roomID]);
+        delete roomTimers[roomID];
+      }
+
       io.to(roomID).emit("session-ended");
     }
   } catch (error) {
     console.error(error);
   }
 });
+
 
   socket.on("disconnect", async () => {
     if (!socket.roomID) return;

@@ -40,21 +40,15 @@ client.interceptors.response.use(
 );
 
 /* your wrapper (so old code keeps working) */
-const api = async (method, url, data=null) => {
+const api = async (method, url, data = null) => {
   try {
-    console.log(`${import.meta.env.VITE_BACKEND_URL}`)
-    const res = await client({
-      method,
-      url,
-      data
-    });
-
+    const res = await client({ method, url, data });
     return res;
-
   } catch (error) {
     console.error(`error in ${url}:`, error?.response?.data || error.message);
     throw error;
   }
 };
+
 
 export default api;

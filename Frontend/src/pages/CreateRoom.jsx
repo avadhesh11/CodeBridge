@@ -351,13 +351,18 @@ export default function CreateRoomPage() {
 
       const defaultName = mode === "practice" ? "Solo Practice Session" : "Interview Room";
 
+      // Filter out fake FALLBACK_QUESTIONS IDs (q1, q2, ...) — they're not in MongoDB.
+      // Only send real 24-char hex MongoDB ObjectIds.
+      const realQuestionIds = [...selectedQuestions].filter(id => /^[a-f0-9]{24}$/i.test(id));
+
       const res = await api("post", "room/new", {
         name: roomName.trim() || defaultName,
-        questionIds: [...selectedQuestions],
+        questionIds: realQuestionIds,
         mode,
         isTimed,
         durationMinutes: actualDuration
       });
+
 
       setRoomId(res.data.roomID);
       setSuccess(true);

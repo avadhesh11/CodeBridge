@@ -2,13 +2,11 @@ import fs from "fs/promises";
 import path from "path";
 import { v4 as uuid } from "uuid";
 import { spawn } from "child_process";
-import pLimit from "p-limit";
 import { Worker } from "bullmq";
 import { connection, createRedisConnection } from "./queueService.js";
 
-// Keep testcase parallelism low — each Docker run consumes ~80-100MB RAM.
-// concurrency=2 means at most 2 testcases run in parallel per job (safe for 512MB containers).
-const limit = pLimit(2);
+// pLimit removed — evaluateFailFast is sequential so parallelism limit is not needed
+
 
 const isWindows = process.platform === "win32";
 
@@ -27,7 +25,7 @@ const configs = {
     compileCmd: null,
     runCmd: "python -B main.py",
     nativeCompileCmd: null,
-    nativeRunCmd: "python3 -B main.py"
+    nativeRunCmd: isWindows ? "python -B main.py" : "python3 -B main.py"
   },
   "Java": {
     filename: "Main.java",
@@ -92,7 +90,7 @@ const isDockerAvailable = async () => {
       isDockerAvailableCache = false;
       lastDockerCheck = Date.now();
       resolve(false);
-    }, 1500);
+    }, 5000);
 
     proc.on("close", (code) => {
       clearTimeout(timer);
@@ -246,12 +244,25 @@ const runSingleTest = async (tc, tempDir, langConfig, timelimit, useDocker) => {
 
     result = await runProcess("docker", dockerArgs, tc.input, maxWaitMs);
   } else {
-    // Native execution on Render / Linux / Host
+    // Native execution on Render / Linux / Host.
+    // Wrap with ulimit to sandbox resource usage and prevent malicious code
+    // from damaging the container (OOM, fork bombs, giant files, etc.)
     const execCmd = isWindows
       ? langConfig.nativeRunCmd
-      : `timeout -s 9 ${sec} ${langConfig.nativeRunCmd}`;
+      : [
+          "bash", "-c",
+          // ulimit flags:
+          //   -v 524288  = max virtual memory 512MB
+          //   -f 65536   = max file size 64MB
+          //   -u 64      = max user processes (prevents fork bombs)
+          //   -t {sec}   = max CPU seconds
+          // then timeout -s 9 kills by wall-clock time
+          `ulimit -v 524288 -f 65536 -u 64 -t ${sec}; timeout -s 9 ${sec} ${langConfig.nativeRunCmd}`
+        ].join(" ");
 
-    result = await runProcess(execCmd, [], tc.input, maxWaitMs, tempDir);
+    result = isWindows
+      ? await runProcess(execCmd, [], tc.input, maxWaitMs, tempDir)
+      : await runProcess("bash", ["-c", `ulimit -v 524288 -f 65536 -u 64 -t ${sec}; timeout -s 9 ${sec} ${langConfig.nativeRunCmd}`], tc.input, maxWaitMs, tempDir);
   }
 
   // ⏱️ Timeout / Killed by signal

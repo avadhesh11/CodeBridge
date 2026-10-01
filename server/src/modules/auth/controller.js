@@ -1,5 +1,7 @@
 import authServices from "./services.js";
 import userModel from "../../models/user.js";
+import jwt from "jsonwebtoken";
+import { cookieOpts } from "./routes.js";
 
 class authController{
 signup=async(req,res,next)=>{
@@ -9,18 +11,9 @@ try {
         return res.status(400).json({message:"All fields are required"});
     }
     const user = await authServices.signup(name, email, password);
-    const cookieOpts = {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    };
+    res.cookie("accessToken", user.accessToken, cookieOpts(30));
+    res.cookie("refreshToken", user.refreshToken, cookieOpts(7));
 
-    res.cookie("accessToken", user.accessToken, cookieOpts);
-    res.cookie("refreshToken", user.refreshToken, {
-      ...cookieOpts,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
 
     return res.status(201).json({
       message: "User created succesfully",
@@ -40,18 +33,9 @@ login=async(req,res,next)=>{
       return res.status(400).json({ message: "All fields are required" });
     }
     const user = await authServices.login(email, password);
-    const cookieOpts = {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    };
+    res.cookie("accessToken", user.accessToken, cookieOpts(30));
+    res.cookie("refreshToken", user.refreshToken, cookieOpts(7));
 
-    res.cookie("accessToken", user.accessToken, cookieOpts);
-    res.cookie("refreshToken", user.refreshToken, {
-      ...cookieOpts,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
 
     return res.status(200).json({
       message: "User logged in succesfully",
@@ -69,6 +53,18 @@ updateProfile = async (req, res, next) => {
     const { name, bio, company, location, skills, role, avatar } = req.body;
     const userId = req.user._id;
 
+    // Validate avatar is a valid URL if provided
+    if (avatar && avatar.trim()) {
+      try {
+        const url = new URL(avatar);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          return res.status(400).json({ success: false, message: "Avatar must be a valid http/https URL" });
+        }
+      } catch {
+        return res.status(400).json({ success: false, message: "Avatar must be a valid URL" });
+      }
+    }
+
     const updatedUser = await userModel.findByIdAndUpdate(
       userId,
       { name, bio, company, location, skills, role, avatar },
@@ -84,6 +80,7 @@ updateProfile = async (req, res, next) => {
     next(error);
   }
 };
+
 
 githubRedirect = async (req, res, next) => {
   try {
@@ -157,20 +154,10 @@ githubCallback = async (req, res, next) => {
     // Authenticate / Register user
     const authenticated = await authServices.githubAuth(githubUser, email);
 
-    // Set cookies
-    res.cookie("accessToken", authenticated.accessToken, {
-      httpOnly: true,
-      secure: false, // false for local development
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    });
+    // Set cookies with env-aware options
+    res.cookie("accessToken", authenticated.accessToken, cookieOpts(30));
+    res.cookie("refreshToken", authenticated.refreshToken, cookieOpts(7));
 
-    res.cookie("refreshToken", authenticated.refreshToken, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
 
     // Redirect to frontend
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -183,13 +170,24 @@ githubCallback = async (req, res, next) => {
 
 logout = async (req, res, next) => {
   try {
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
+    // Revoke the refresh token in DB so it can't be used again
+    const token = req.cookies?.accessToken;
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
+        await userModel.findByIdAndUpdate(decoded.id, { currentRefreshToken: null });
+      } catch { /* token may be expired — still clear cookies */ }
+    }
+
+    const clearOpts = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" };
+    res.clearCookie("accessToken", clearOpts);
+    res.clearCookie("refreshToken", clearOpts);
     return res.status(200).json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     next(error);
   }
 };
+
 };
 
 export default new authController();

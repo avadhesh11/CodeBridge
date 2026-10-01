@@ -152,10 +152,10 @@ const styles = `
 
 
 
-export default function HomePage({user}) {
-  const navigate=useNavigate();
-  const { logout } = useAuth();
-  const scrollref=useRef();
+export default function HomePage() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const scrollref = useRef();
   const [typed, setTyped] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
 const [roomCode, setRoomCode] = useState("");
@@ -245,9 +245,23 @@ const handleJoinRoom = () => {
               Real-time collaborative coding interviews with Docker-powered C++ execution, WebRTC video, and instant verdicts.
             </p>
             <div className="hero-actions">
-              <a href="/signup" className="btn-primary">Start Interviewing →</a>
-              <a href="/login" className="btn-secondary">Join as Candidate</a>
+              {user ? (
+                <>
+                  <button className="btn-primary" onClick={() => navigate("/create")}>
+                    Start Interviewing →
+                  </button>
+                  <button className="btn-secondary" onClick={() => setShowJoinModal(true)}>
+                    Join as Candidate
+                  </button>
+                </>
+              ) : (
+                <>
+                  <a href="/login" className="btn-primary">Start Interviewing →</a>
+                  <a href="/login" className="btn-secondary">Join as Candidate</a>
+                </>
+              )}
             </div>
+
           </div>
         </section>
 

@@ -2,13 +2,7 @@ import { createRedisConnection } from "../services/queueService.js";
 
 const rateLimitRedis = createRedisConnection("ratelimit");
 
-/**
- * Rate limiter middleware for code execution.
- *
- * Two separate limits keyed by type:
- *   - "sample" (Run button)  → 1 request per user per 10 seconds
- *   - "hidden" (Submit button) → 1 request per user per 60 seconds
- */
+
 const LIMITS = {
   sample: { max: 1, windowSec: 10,  label: "run" },
   hidden: { max: 1, windowSec: 60,  label: "submit" },
