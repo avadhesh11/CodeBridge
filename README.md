@@ -234,13 +234,13 @@ _(See dedicated section below)_
 
 ```
 CodeBridge/
-├── docker-compose.yml          # Full stack: backend + frontend + mongo + redis
+├── docker-compose.yml          # Full stack: api + worker + frontend + mongo + redis
 │
-├── server/                     # Node.js backend
-│   ├── server.js               # HTTP server entry point, prewarms Docker images
-│   ├── Dockerfile              # Node 20 + g++ + python3 + openjdk + docker CLI
-│   ├── .env                    # Local env vars (not committed in prod)
-│   ├── package.json            # npm scripts: start, dev, test:security, test:load
+├── server/                     # API Service (Render Web Service)
+│   ├── server.js               # HTTP & Socket.io server entry point
+│   ├── Dockerfile              # Container image for API service
+│   ├── package.json            # Express, Socket.io, Auth, Sockets dependencies
+│   ├── .env.example            # API environment variables template
 │   │
 │   ├── src/
 │   │   ├── app.js              # Express setup, CORS, MongoDB connect, route mounting
@@ -249,35 +249,52 @@ CodeBridge/
 │   │   │   ├── room.js         # Room schema (anti-cheat logs, submissions, settings)
 │   │   │   ├── user.js         # User schema (GitHub OAuth, profile fields)
 │   │   │   ├── question.js     # Question schema (sample/hidden TCs, timelimit)
+│   │   │   ├── submission.js   # Standalone Submission lifecycle model
 │   │   │   └── chats.js        # Chat message schema
 │   │   │
 │   │   ├── modules/
 │   │   │   ├── auth/           # Login, signup, logout, GitHub OAuth, token refresh
-│   │   │   ├── room/           # Create room, run code, close room, get rooms
+│   │   │   ├── room/           # Create room, run code, submission status, get rooms
 │   │   │   └── questions/      # CRUD for questions
 │   │   │
 │   │   ├── sockets/
-│   │   │   ├── index.js        # Socket.io init + JWT auth middleware + Redis adapter
+│   │   │   ├── index.js        # Socket.io init + Redis adapter + cross-process worker relay
 │   │   │   └── roomSocket.js   # All real-time handlers (join, code, chat, WebRTC, anti-cheat)
 │   │   │
 │   │   ├── services/
-│   │   │   ├── executionService.js  # Docker sandbox, compile, run, judge, BullMQ worker
-│   │   │   └── queueService.js      # Redis connection factory, BullMQ queue & events
+│   │   │   └── queueService.js # BullMQ queue producer, connection pool, Upstash backoff
 │   │   │
 │   │   ├── middleware/
-│   │   │   ├── authmiddleware.js    # JWT cookie verification
-│   │   │   ├── rateLimiter.js       # Redis sliding-window rate limiter
-│   │   │   ├── idempotency.js       # SHA-256 request deduplication cache
-│   │   │   └── errorHandler.js      # Global Express error handler
+│   │   │   ├── authmiddleware.js # JWT cookie verification
+│   │   │   ├── rateLimiter.js    # Redis sliding-window rate limiter (circuit-breaker enabled)
+│   │   │   ├── idempotency.js    # SHA-256 request deduplication cache (circuit-breaker enabled)
+│   │   │   └── errorHandler.js   # Global Express error handler
 │   │   │
-│   │   ├── config/             # Configuration files
-│   │   └── utils/              # Utility helpers
+│   │   └── utils/
 │   │
 │   └── test/
-│       ├── securitySandbox.js  # 6 sandbox security tests (TLE, OOM, fork bomb, SSRF...)
-│       └── loadTest.js         # Multi-instance load test + concurrent execution benchmark
+│       ├── refactorVerification.js # Verification suite for API and worker decoupling
+│       ├── securitySandbox.js      # Sandbox security test suite
+│       └── loadTest.js             # Concurrency & multi-socket load test
 │
-└── Frontend/                   # React + Vite frontend
+├── execution-service/          # Standalone Code Execution Service (AWS EC2 / Render Fallback)
+│   ├── index.js                # Worker entry point, connects to DB & boots BullMQ worker
+│   ├── test.js                 # Standalone execution engine test suite
+│   ├── package.json            # Ultra-lean (bullmq, ioredis, mongoose, uuid, dotenv)
+│   ├── Dockerfile              # Compilers (g++, python3, default-jdk) + Docker CLI
+│   ├── .env.example            # Worker environment configuration template
+│   │
+│   └── src/
+│       ├── engine.js           # Multi-language sandbox runner (Docker & Native Linux fallback)
+│       ├── worker.js           # BullMQ worker consumer, result persistence, Redis Pub/Sub
+│       ├── config.js           # Redis connection factory with Upstash quota circuit breaker
+│       └── models/             # Lean Submission & Room models for persistence
+│
+├── docs/                       # Production Deployment Documentation
+│   ├── aws-ec2-deployment.md   # Complete AWS EC2 (Docker sandbox + systemd) guide
+│   └── render-deployment.md    # Render API and Fallback Worker deployment guide
+│
+└── Frontend/                   # React + Vite frontend application
     ├── Dockerfile              # Nginx-based production build
     ├── nginx.conf              # SPA fallback config
     ├── vite.config.js
@@ -619,7 +636,7 @@ Spins up 2 independent Socket.io server instances, verifies cross-instance event
 
 ## 🌍 Environment Variables
 
-### Server (`server/.env`)
+### API Service (`server/.env`)
 
 | Variable | Required | Description |
 |---|---|---|
@@ -631,8 +648,16 @@ Spins up 2 independent Socket.io server instances, verifies cross-instance event
 | `BACKEND_URL` | ✅ | This server's public URL (used in GitHub OAuth callback) |
 | `GITHUB_CLIENT_ID` | ⬜ | GitHub OAuth App client ID |
 | `GITHUB_CLIENT_SECRET` | ⬜ | GitHub OAuth App client secret |
-| `TEMP_VOLUME_NAME` | ⬜ | Named Docker volume for temp execution files |
 | `ENABLE_QUEUE_BOARD` | ⬜ | `true` to enable BullMQ dashboard at `/admin/queues` |
+
+### Execution Service (`execution-service/.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `MONGO_URI` | ✅ | Same MongoDB URI as API service (used to update submission results) |
+| `REDIS_URL` | ✅ | Same Redis URL as API service (used to pull jobs from BullMQ) |
+| `EXECUTION_RUNNER` | ⬜ | `docker` (strict Docker isolation), `native` (ulimit sandbox), or `auto` (default) |
+| `WORKER_CONCURRENCY`| ⬜ | Max simultaneous jobs (default: `1` to prevent memory exhaustion) |
 
 ### Frontend (`Frontend/.env`)
 
@@ -647,79 +672,62 @@ Spins up 2 independent Socket.io server instances, verifies cross-instance event
 
 ### Prerequisites
 - Node.js 20+
-- Docker Desktop (for code sandbox)
+- Docker Desktop (for containerized execution) or local compilers (`g++`, `python3`)
 - MongoDB (Atlas free tier or local)
 - Redis (Upstash free tier or local)
 
 ### 1. Clone & Install
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/avadhesh11/CodeBridge.git
 cd CodeBridge
 
 cd server && npm install
+cd ../execution-service && npm install
 cd ../Frontend && npm install
 ```
 
 ### 2. Configure Environment
 
+Copy `.env.example` templates to `.env` in `server` and `execution-service`:
 ```bash
-# server/.env
-MONGO_URI=mongodb://127.0.0.1:27017/codebridge
-ACCESS_SECRET=your_access_secret_here
-REFRESH_SECRET=your_refresh_secret_here
-REDIS_URL=redis://127.0.0.1:6379
-FRONTEND_URL=http://localhost:5173
-BACKEND_URL=http://localhost:5000
+cp server/.env.example server/.env
+cp execution-service/.env.example execution-service/.env
 ```
+*(Populate with your MongoDB and Redis connection strings).*
 
-```bash
-# Frontend/.env
-VITE_BACKEND_URL=http://localhost:5000
-VITE_FRONTEND_URL=http://localhost:5173
-```
-
-### 3. Start Services
+### 3. Start All 3 Services
 
 ```bash
-# Terminal 1 — Backend
-cd server
-npm run dev
+# Terminal 1 — API Server (Express + Socket.io)
+cd server && npm run dev
 
-# Terminal 2 — Frontend
-cd Frontend
-npm run dev
+# Terminal 2 — Execution Worker (BullMQ + Docker sandbox)
+cd execution-service && npm run dev
+
+# Terminal 3 — Frontend (React + Vite)
+cd Frontend && npm run dev
 ```
 
-Open **http://localhost:5173**
-
-Public question bank ("Two Sum", "Valid Parentheses") is auto-seeded on first startup.
+Open **http://localhost:5173** in your browser.
 
 ---
 
 ## 🐳 Docker Deployment
 
-Full stack with a single command:
+Run the complete distributed stack with a single command:
 
 ```bash
-# From project root
 docker compose up --build
 ```
 
 | Service | Port | Description |
 |---|---|---|
 | `frontend` | `3000` | React app served via Nginx |
-| `backend` | `5000` | Node.js API + Socket.io |
+| `api` | `5000` | Express REST API + Socket.io |
+| `worker` | — | Background execution worker connected to host Docker socket |
 | `mongo` | `27017` | MongoDB with persistent volume |
-| `redis` | `6379` | Redis for pub/sub + BullMQ |
-
-The backend container has Docker CLI installed and mounts `/var/run/docker.sock` to spawn sandbox containers on the host Docker daemon.
-
-### Scale Backend Instances
-
-```bash
-docker compose up --scale backend=3 --build
-```
+| `redis` | `6379` | Redis for BullMQ queues and pub/sub |
 
 All instances share the same Redis adapter and MongoDB, so state is consistent across all replicas.
 
