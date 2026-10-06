@@ -1,4 +1,5 @@
 import "dotenv/config";
+import http from "http";
 import mongoose from "mongoose";
 import { startExecutionWorker, stopExecutionWorker } from "./src/worker.js";
 
@@ -33,9 +34,24 @@ async function bootstrap() {
   await connectDatabase();
   await startExecutionWorker();
 
+  // If deployed as a Render Web Service (Free Tier), bind to $PORT for health checks
+  let healthServer = null;
+  if (process.env.PORT) {
+    healthServer = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "OK", service: "codebridge-execution-worker" }));
+    });
+    healthServer.listen(process.env.PORT, () => {
+      console.log(`🌐 [Worker] Health check listening on port ${process.env.PORT}`);
+    });
+  }
+
   const shutdown = async (signal) => {
     console.log(`\n🛑 [Worker] Received ${signal}. Starting graceful shutdown...`);
     try {
+      if (healthServer) {
+        healthServer.close();
+      }
       await stopExecutionWorker();
       if (mongoose.connection.readyState !== 0) {
         await mongoose.disconnect();
