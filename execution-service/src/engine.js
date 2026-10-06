@@ -250,7 +250,7 @@ export const runSingleTest = async (tc, tempDir, langConfig, timelimit, useDocke
     } else {
       result = await runProcess(
         "bash",
-        ["-c", `ulimit -v 524288 -f 65536 -u 64 -t ${sec}; timeout -s 9 ${sec} ${langConfig.nativeRunCmd}`],
+        ["-c", `ulimit -f 65536 2>/dev/null; timeout -s 9 ${sec} ${langConfig.nativeRunCmd}`],
         tc.input,
         maxWaitMs,
         tempDir
