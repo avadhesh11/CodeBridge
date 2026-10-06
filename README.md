@@ -51,6 +51,8 @@ The system is horizontally scalable via Socket.io + Redis pub/sub and uses Docke
 
 ## 🏛 Architecture
 
+CodeBridge is refactored into two independently deployable services sharing an external Redis and MongoDB cluster:
+
 ```
 +-------------------------------------------------------------------------+
 |                          BROWSER (React + Vite)                         |
@@ -60,10 +62,10 @@ The system is horizontally scalable via Socket.io + Redis pub/sub and uses Docke
 |  |  Editor  |  |  (code/chat/AC)   |  |  (SimplePeer)|  | Sidebar  |  |
 |  +----+-----+  +--------+----------+  +------+-------+  +-----+----+  |
 +-------+-----------------+-----------------------+---------------+-------+
-        | HTTP REST        | WebSocket             | WebRTC SDP/ICE|
-        v                 v                        v (via signaling)|
+        | HTTP REST        | WebSocket             | WebRTC SDP/ICE
+        v                 v                        v (signaling)
 +------------------------------------------------------------------------+
-|                       EXPRESS + SOCKET.IO SERVER                       |
+|                      API SERVICE (Render / Node.js)                    |
 |                                                                        |
 |  +-------------+  +-------------------+  +------------------------+   |
 |  |  REST API   |  |  Socket Handlers  |  |   Middleware Stack     |   |
@@ -72,37 +74,39 @@ The system is horizontally scalable via Socket.io + Redis pub/sub and uses Docke
 |  |  /api/quest |  |  code-change      |  | - Idempotency (Redis)  |   |
 |  +------+------+  |  anti-cheat       |  | - CORS                 |   |
 |         |         +--------+----------+  +------------------------+   |
-|         |                  | Redis Adapter (pub/sub)                   |
+|         | Creates          | Redis Pub/Sub                             |
+|         | Submission       | (Socket.io horizontal adapter)           |
+|         | Record           |                                           |
 |         v                  v                                           |
-|  +----------------------------------------------+                     |
-|  |           BullMQ Execution Queue             |                     |
-|  |  Job -> Worker -> Docker container -> Result |                     |
-|  +----------------------------------------------+                     |
-+----------+----------------------+-----------------------------------------+
-           |                      |
-     +-----v----+          +------v-------------------------+
-     | MongoDB  |          |  Redis (Upstash / local)       |
-     |  Atlas   |          |  - Socket.io pub/sub           |
-     | Mongoose |          |  - BullMQ queues               |
-     +----------+          |  - Rate limiting               |
-                           |  - Idempotency cache           |
-                           +--------------------------------+
+|  +------------------------------------------------------------------+  |
+|  | BullMQ Job Producer (enqueues to Redis 'executionQueue')         |  |
+|  +------------------------------------------------------------------+  |
++---------------------+-------------------------------+------------------+
+                      |                               |
+              +-------v-------+               +-------v-------------------------+
+              | MongoDB Atlas |               | Cloud Redis (BullMQ / Pub/Sub)  |
+              | (Submissions, |               | - 'executionQueue'              |
+              |  Rooms, Users)|               | - 'codebridge:execution:results'|
+              +-------^-------+               +-------+-------------------------+
+                      |                               |
+                      | Persists Results              | Consumes execution jobs
+                      +-------------------------------+
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+         v (Primary: AWS EC2)                                      v (Fallback: Render)
++------------------------------------+    +------------------------------------+
+| AWS EC2 EXECUTION WORKER           |    | RENDER FALLBACK WORKER             |
+| - Node.js BullMQ Worker            |    | - Node.js BullMQ Worker            |
+| - Docker Engine Container Sandbox  |    | - Native Linux Runner with ulimit  |
+| - --network=none --memory=128m     |    | - Memory & CPU timeout watchdog    |
+| - Publishes to Redis pub/sub       |    | - Publishes to Redis pub/sub       |
++------------------------------------+    +------------------------------------+
 ```
 
-### Horizontal Scaling Flow
-
-```
-Instance A (port 5051)                  Instance B (port 5052)
-     |                                        |
-     |  Interviewer connects -> Socket A       |  Candidate connects -> Socket B
-     |                                        |
-     |---- code-change event ---------------->|
-     |         Redis pub/sub fan-out          |
-     |<--- candidate-violation-alert ----------|
-     |                                        |
-     +-------- Both sockets see same room ----+
-                    via Redis adapter
-```
+### Deployment Guides
+- 📖 [AWS EC2 Worker Deployment Guide](docs/aws-ec2-deployment.md)
+- 📖 [Render API & Fallback Worker Deployment Guide](docs/render-deployment.md)
 
 ---
 
@@ -169,7 +173,7 @@ _(See dedicated section below)_
 | Test cases | Sample (visible) and hidden test cases per question |
 | Constraints | Free-text constraints field |
 | Time limit | Per-question time limit (default: 2 seconds) |
-| Memory limit | Schema field for memory limit (default: 256 MB) |
+| Memory limit | Schema field only (`memorylimit`, default 256 MB) — **not enforced by sandbox**; Docker hard limit is `--memory=128m` |
 | Import | Bulk import via `ImportQuestionsModal` component |
 
 ### 👤 User & Auth
@@ -373,7 +377,7 @@ Question {
   description:  String
   constraints:  String
   timelimit:    Number (seconds, default 2)
-  memorylimit:  Number (MB, default 256)
+  memorylimit:  Number (MB, default 256)  // schema field only; actual sandbox limit is --memory=128m
   sampletcs:    [{ input, output, explanation }]
   hiddentcs:    [{ input, output }]
   createdAt, updatedAt
@@ -550,7 +554,7 @@ The server **never trusts the client**:
   - **Disqualify** → `interviewer-disqualify-candidate` (closes room for all)
 - All logs are viewable in the **Manage page** audit trail
 
-**Bypass resistance:** Even if a candidate patches frontend JS, the server independently tracks and persists violations. The interviewer always has the full audit log regardless of client-side manipulation.
+**Honest limits:** Patching frontend JS does not defeat server-side logging — violations are persisted to MongoDB regardless of what the client does, and the interviewer always has the full audit trail. However, this system cannot detect cheating that happens entirely off-device (e.g., consulting a second laptop or phone). The proctoring layer raises the cost of cheating and provides a real audit log; it is not a tamper-proof guarantee.
 
 ---
 
@@ -580,8 +584,8 @@ Instance A (port 5051)     Redis Pub/Sub      Instance B (port 5052)
 | Cross-instance routing | ✅ Verified (Code sync A→B, Violation sync B→A) |
 | Concurrent rooms | 25 rooms (50 active sockets) |
 | All sockets joined | < 2 seconds |
-| Message propagation (avg) | ~8ms |
-| Message propagation (P95) | ~15ms |
+| Message propagation (avg) | ~8ms (n=25, single machine, loopback) |
+| Message propagation (P95) | ~15ms (n=25 — small sample, indicative only) |
 | Concurrent code executions | 12 simultaneous (Python + JS + C++) |
 | Execution success rate | 100% |
 | Average execution time | ~2,800ms (C++ compile + run) |

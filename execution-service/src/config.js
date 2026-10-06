@@ -1,20 +1,17 @@
-import { Queue, QueueEvents } from "bullmq";
 import IORedis from "ioredis";
 
-export const EXECUTION_QUEUE_NAME = "executionQueue";
-export const CROSS_PROCESS_CHANNEL = "codebridge:execution:results";
+export const QUEUE_NAME = "executionQueue";
+export const RESULTS_CHANNEL = "codebridge:execution:results";
 
 const rawRedisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
-
 const isUpstash = rawRedisUrl.includes("upstash.io");
 const isTls = rawRedisUrl.startsWith("rediss://") || isUpstash;
 
-// Ensure rediss:// protocol for Upstash
 const redisUrl = (isUpstash && rawRedisUrl.startsWith("redis://"))
   ? rawRedisUrl.replace("redis://", "rediss://")
   : rawRedisUrl;
 
-export const createRedisConnection = (name = "default") => {
+export const createRedisConnection = (name = "worker") => {
   const client = new IORedis(redisUrl, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
@@ -28,7 +25,6 @@ export const createRedisConnection = (name = "default") => {
   });
 
   client.on("error", (err) => {
-    // Upstash serverless drops idle sockets gracefully — ignore EPIPE / ECONNRESET logs
     if (
       err.code === "ECONNRESET" ||
       err.code === "EPIPE" ||
@@ -42,20 +38,3 @@ export const createRedisConnection = (name = "default") => {
 
   return client;
 };
-
-export const connection = createRedisConnection("main");
-
-export const executionQueue = new Queue(EXECUTION_QUEUE_NAME, {
-  connection: createRedisConnection("queue"),
-  skipVersionCheck: true,
-  defaultJobOptions: {
-    attempts: 1, // No automatic retry of failed execution
-    removeOnComplete: 100,
-    removeOnFail: 100
-  }
-});
-
-export const queueEvents = new QueueEvents(EXECUTION_QUEUE_NAME, {
-  connection: createRedisConnection("events"),
-  skipVersionCheck: true
-});

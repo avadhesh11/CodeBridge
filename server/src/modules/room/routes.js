@@ -12,11 +12,15 @@ router.post("/new", authMiddleware, roomController.createRoom);
 //   1. authMiddleware   — ensures req.user exists
 //   2. executionRateLimiter — blocks > 1 req/user/min with 429
 //   3. executionIdempotency — returns cached result for duplicate submissions
-//   4. roomController.runCode — actual execution (only reached if new, non-rate-limited request)
+//   4. roomController.runCode — enqueues to BullMQ (synchronous or async)
 router.post("/codeTest", authMiddleware, executionRateLimiter, executionIdempotency, roomController.runCode);
+
+// Retrieve submission status / verdict across asynchronous lifecycle
+router.get("/submission/:submissionId", authMiddleware, roomController.getSubmissionStatus);
 
 router.post("/close/:roomID", authMiddleware, roomController.closeRoom);
 router.get("/questions/:roomID", authMiddleware, roomController.getQuestions);
 router.get("/user/all", authMiddleware, roomController.getUserRooms);
 router.get("/:roomID", authMiddleware, roomController.getRoom);
-export default router;
+
+export default router;

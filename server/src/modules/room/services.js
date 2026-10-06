@@ -1,54 +1,32 @@
 import roomModel from "../../models/room.js";
 import { nanoid } from "nanoid";
 import questionModel from "../../models/question.js";
+import submissionModel from "../../models/submission.js";
 import { executionQueue, queueEvents } from "../../services/queueService.js";
 
-// const question = {
-//   format:"multiple",
-//   sampleTestcases: [
-//     { input: "1 1", output: "2" },
-//     { input: "2 3", output: "5" },
-//     { input: "5 7", output: "12" },
-//     { input: "10 20", output: "30" },
-//     // Sequential increasing
-//     { input: "11 22", output: "33" },
-//     { input: "12 24", output: "36" },
-//     // Edge values
-//     { input: "0 0", output: "0" },
-//     { input: "0 5", output: "5" },
-//     { input: "5 0", output: "5" },
-//     { input: "-1 1", output: "0" },
-//     { input: "-5 -5", output: "-10" },
-//     { input: "-10 20", output: "10" },
-//     { input: "20 -10", output: "10" },
-
-//     // Mixed ranges (auto-generated pattern)
-//   ]
-// };
-
-class roomServices{
-newRoom=async(userid, name, questionIds=[], mode="interview", isTimed=false, durationMinutes=null)=>{
-    const roomID=nanoid(8);
+class roomServices {
+  newRoom = async (userid, name, questionIds = [], mode = "interview", isTimed = false, durationMinutes = null) => {
+    const roomID = nanoid(8);
     const roomData = {
-        roomID,
-        roomName: name,
-        interviewer: userid,
-        status: "active",
-        mode: mode === "practice" ? "practice" : "interview",
-        isTimed: Boolean(isTimed),
-        durationMinutes: isTimed && durationMinutes ? Number(durationMinutes) : null,
-        expiresAt: null // Timer begins when session is launched/joined
+      roomID,
+      roomName: name,
+      interviewer: userid,
+      status: "active",
+      mode: mode === "practice" ? "practice" : "interview",
+      isTimed: Boolean(isTimed),
+      durationMinutes: isTimed && durationMinutes ? Number(durationMinutes) : null,
+      expiresAt: null
     };
     if (questionIds.length > 0) {
-        roomData.questions = questionIds;
-        roomData.currentQuestion = questionIds[0]; // first question shown by default
+      roomData.questions = questionIds;
+      roomData.currentQuestion = questionIds[0];
     }
     const room = await roomModel.create(roomData);
     await room.save();
     return roomID;
-}
- async getRoom(roomID) {
+  };
 
+  async getRoom(roomID) {
     const room = await roomModel
       .findOne({ roomID })
       .populate("interviewer", "name email")
@@ -62,37 +40,25 @@ newRoom=async(userid, name, questionIds=[], mode="interview", isTimed=false, dur
     }
 
     return room;
-
   }
 
- async getRoomQuestions(roomID) {
-
-    const room = await roomModel
-      .findOne({ roomID })
-      .populate("questions");
-
+  async getRoomQuestions(roomID) {
+    const room = await roomModel.findOne({ roomID }).populate("questions");
     if (!room) throw new Error("Room not found");
-
     return room.questions;
   }
 
-  // Get ALL questions for a room: public (from room.questions[]) + private (by roomId field)
   async getAllRoomQuestionsForManager(roomID) {
-    const room = await roomModel
-      .findOne({ roomID })
-      .populate("questions");
-
+    const room = await roomModel.findOne({ roomID }).populate("questions");
     if (!room) throw new Error("Room not found");
 
-    // Public questions already stored in room.questions[]
-    const publicQs = (room.questions || []).map(q => ({
+    const publicQs = (room.questions || []).map((q) => ({
       ...q.toObject(),
       _source: "public"
     }));
 
-    // Private questions created specifically for this room
     const privateQs = await questionModel.find({ qtype: "private", roomId: roomID });
-    const privateArr = privateQs.map(q => ({
+    const privateArr = privateQs.map((q) => ({
       ...q.toObject(),
       _source: "private"
     }));
@@ -100,77 +66,154 @@ newRoom=async(userid, name, questionIds=[], mode="interview", isTimed=false, dur
     return [...privateArr, ...publicQs];
   }
 
-runCode = async (code, questionId, type = "sample", roomID = null, userId = null, language = "C++") => {
-  if (!code) {
-    return { verdict: "INVALID", error: "Code required" };
-  }
+  /**
+   * Submits code for execution.
+   * Creates a persistent Submission record in QUEUED state, then enqueues to BullMQ.
+   * If isAsync is true, immediately returns submission tracking info.
+   * If isAsync is false (default), waits for the execution worker result for full backward compatibility.
+   */
+  runCode = async (
+    code,
+    questionId,
+    type = "sample",
+    roomID = null,
+    userId = null,
+    language = "C++",
+    isAsync = false
+  ) => {
+    if (!code) {
+      return { verdict: "INVALID", error: "Code required" };
+    }
 
-  const question = await questionModel.findById(questionId);
+    const question = await questionModel.findById(questionId);
+    if (!question) {
+      return { verdict: "INVALID", error: "Question not found" };
+    }
 
-  if (!question) {
-    return { verdict: "INVALID", error: "Question not found" };
-  }
-
-  try {
+    const submissionId = nanoid(14);
     const testcases = type === "sample" ? question.sampletcs : question.hiddentcs;
     const timelimit = question.timelimit || 2;
 
-    // Enqueue the execution job
-    const job = await executionQueue.add("execute", {
-      testcases,
-      code,
-      language: language || "C++",
-      timelimit
-    }, {
-      attempts: 1
-    });
+    // 1. Create persistent submission record in MongoDB
+    let submissionRecord;
+    try {
+      submissionRecord = await submissionModel.create({
+        submissionId,
+        userId,
+        roomID,
+        questionId,
+        type,
+        language: language || "C++",
+        code,
+        status: "QUEUED",
+        verdict: "PENDING"
+      });
+    } catch (dbErr) {
+      console.error("Failed to persist initial submission record:", dbErr.message);
+    }
 
-    // Wait for worker to complete — with a 90s timeout so the HTTP request
-    // doesn't hang forever if the worker crashes or Redis drops the job.
-    const result = await job.waitUntilFinished(queueEvents, 90_000);
-
-
-    if (type === "hidden" && roomID && userId) {
-      const room = await roomModel.findOne({ roomID });
-      if (room) {
-        room.submissions.push({
-          user: userId,
-          question: questionId,
-          verdict: result.verdict,
+    // 2. Enqueue job to BullMQ
+    let job;
+    try {
+      job = await executionQueue.add(
+        "execute",
+        {
+          submissionId,
+          questionId,
+          testcases,
           code,
           language: language || "C++",
-          createdAt: new Date()
-        });
-        await room.save();
+          timelimit,
+          roomID,
+          userId,
+          type
+        },
+        {
+          attempts: 1
+        }
+      );
+    } catch (queueErr) {
+      console.error("🔥 BullMQ enqueueing failure:", queueErr.message);
+      if (submissionRecord) {
+        await submissionModel.updateOne(
+          { submissionId },
+          {
+            $set: {
+              status: "INTERNAL_ERROR",
+              verdict: "ERROR",
+              error: `Queue insertion failure: ${queueErr.message}`
+            }
+          }
+        );
+      }
+      return { verdict: "ERROR", error: "Service temporarily unavailable. Could not queue job." };
+    }
+
+    // 3. Return immediately if asynchronous mode requested
+    if (isAsync) {
+      return {
+        submissionId,
+        status: "QUEUED",
+        verdict: "PENDING",
+        message: "Submission enqueued successfully"
+      };
+    }
+
+    // 4. Synchronous backward-compatibility wait
+    try {
+      const result = await job.waitUntilFinished(queueEvents, 90_000);
+      return {
+        ...result,
+        submissionId
+      };
+    } catch (err) {
+      console.error("🔥 Execution timeout or error waiting for worker:", err.message);
+      return {
+        submissionId,
+        verdict: "ERROR",
+        error: err.message || "Execution wait timed out"
+      };
+    }
+  };
+
+  /**
+   * Retrieves current status and verdict for a submission.
+   */
+  async getSubmissionStatus(submissionId, userId) {
+    const submission = await submissionModel
+      .findOne({ submissionId })
+      .populate("questionId", "title tag timelimit");
+
+    if (!submission) return null;
+
+    // Authorization: User must be submission owner or an interviewer in the room
+    if (userId && submission.userId.toString() !== userId.toString()) {
+      if (submission.roomID) {
+        const room = await roomModel.findOne({ roomID: submission.roomID });
+        const isInterviewer = room?.interviewer?.toString() === userId.toString();
+        if (!isInterviewer) {
+          throw new Error("Unauthorized to view this submission");
+        }
+      } else {
+        throw new Error("Unauthorized to view this submission");
       }
     }
 
-    return result;
-  } catch (err) {
-    console.error("🔥 EXECUTION CRASH/QUEUE ERROR:", err);
-    return { verdict: "ERROR", error: err.message };
+    return submission;
   }
-};
+
   async closeRoom(roomID) {
-
     const room = await roomModel.findOne({ roomID });
-
     if (!room) throw new Error("Room not found");
-
     room.status = "closed";
-
     await room.save();
-
     return room;
   }
 
   async getUserRooms(userid) {
     return await roomModel
       .find({
-        $or: [
-          { interviewer: userid },
-          { candidate: userid }
-        ]
+        $or: [{ interviewer: userid }, { candidate: userid }]
       })
       .populate("interviewer", "name email")
       .populate("candidate", "name email")
@@ -179,8 +222,6 @@ runCode = async (code, questionId, type = "sample", roomID = null, userId = null
       .populate("submissions.question")
       .sort({ createdAt: -1 });
   }
-
-
-};
+}
 
 export default new roomServices();

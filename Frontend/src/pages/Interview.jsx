@@ -678,12 +678,18 @@ export default function InterviewPage() {
       setTimeout(() => navigate("/dashboard"), 3000);
     });
 
+    socket.on("execution-result", (data) => {
+      if (data?.type === "hidden") {
+        fetchRoomDetails();
+      }
+    });
+
     return () => {
       socket.off("connect");
       ["joined-successfully", "error-message", "code-update", "language-update",
         "candidate-left-fullscreen-alert", "candidate-violation-alert", "anti-cheat-status", "candidate-warning", "question-selected",
         "chat", "chat-history", "webrtc-offer", "webrtc-answer", "webrtc-ice",
-        "start-call", "screen-share-start", "screen-share-stop", "session-ended"
+        "start-call", "screen-share-start", "screen-share-stop", "session-ended", "execution-result"
       ].forEach(e => socket.off(e));
       socket.disconnect();
     };

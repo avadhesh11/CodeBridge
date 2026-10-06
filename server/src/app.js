@@ -23,7 +23,7 @@ const allowedOrigins = process.env.FRONTEND_URL
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (curl, mobile, server-to-server)
+  
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
@@ -128,7 +128,6 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import { executionQueue } from "./services/queueService.js";
 
-// BullMQ Visual Dashboard (disabled by default in production)
 if (process.env.ENABLE_QUEUE_BOARD === "true") {
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath("/admin/queues");

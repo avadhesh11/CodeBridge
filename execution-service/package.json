@@ -1,0 +1,18 @@
+{
+  "name": "codebridge-execution-service",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.80.2",
+    "dotenv": "^17.3.1",
+    "ioredis": "^5.11.1",
+    "mongoose": "^9.2.1",
+    "uuid": "^13.0.0"
+  }
+}

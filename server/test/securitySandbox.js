@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { runSample } from "../src/services/executionService.js";
+import { runSample } from "../../execution-service/src/engine.js";
 
 const ANSI = {
   reset: "\x1b[0m",

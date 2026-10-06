@@ -11,6 +11,7 @@ node_modules/
 .env
 dist/
 build/
+temp/
 *.log
 Dockerfile.local
 docker-compose.override.yml

@@ -6,7 +6,7 @@ import { io as ioClient } from "socket.io-client";
 import app from "../src/app.js";
 import initSocket from "../src/sockets/index.js";
 import roomModel from "../src/models/room.js";
-import { runSample } from "../src/services/executionService.js";
+import { runSample } from "../../execution-service/src/engine.js";
 
 const ANSI = {
   reset: "\x1b[0m",
