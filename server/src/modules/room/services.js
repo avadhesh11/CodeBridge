@@ -2,7 +2,7 @@ import roomModel from "../../models/room.js";
 import { nanoid } from "nanoid";
 import questionModel from "../../models/question.js";
 import submissionModel from "../../models/submission.js";
-import { executionQueue, queueEvents } from "../../services/queueService.js";
+import { executionQueue } from "../../services/queueService.js";
 
 class roomServices {
   newRoom = async (userid, name, questionIds = [], mode = "interview", isTimed = false, durationMinutes = null) => {
@@ -159,21 +159,27 @@ class roomServices {
       };
     }
 
-    // 4. Synchronous backward-compatibility wait
-    try {
-      const result = await job.waitUntilFinished(queueEvents, 90_000);
-      return {
-        ...result,
-        submissionId
-      };
-    } catch (err) {
-      console.error("🔥 Execution timeout or error waiting for worker:", err.message);
-      return {
-        submissionId,
-        verdict: "ERROR",
-        error: err.message || "Execution wait timed out"
-      };
+    // 4. Synchronous wait: Poll MongoDB record every 1s (avoids 24/7 Redis stream polling)
+    const startTime = Date.now();
+    const timeoutMs = 90_000;
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const sub = await submissionModel.findOne({ submissionId }).lean();
+      if (sub && sub.status !== "QUEUED" && sub.status !== "RUNNING" && sub.status !== "PENDING") {
+        return {
+          submissionId,
+          verdict: sub.verdict,
+          results: sub.results || [],
+          error: sub.error || null
+        };
+      }
     }
+
+    return {
+      submissionId,
+      verdict: "ERROR",
+      error: "Execution wait timed out"
+    };
   };
 
   /**

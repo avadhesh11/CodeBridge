@@ -131,7 +131,9 @@ export const startExecutionWorker = async ({ concurrency = 1 } = {}) => {
       connection: workerRedis,
       concurrency: Number(process.env.WORKER_CONCURRENCY) || concurrency,
       skipVersionCheck: true,
-      lockDuration: 120_000
+      lockDuration: 120_000,
+      stalledInterval: 300_000, // 5 min interval saves Upstash command quotas on idle
+      drainDelay: 10_000         // 10s wait when queue is empty saves polling bandwidth
     }
   );
 

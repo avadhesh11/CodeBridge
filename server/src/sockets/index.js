@@ -5,10 +5,6 @@ import registerRoom from "./roomSocket.js";
 import jwt from "jsonwebtoken";
 import cookie from "cookie";
 
-const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(",").map((s) => s.trim().replace(/\/$/, ""))
-  : ["http://localhost:3000", "http://localhost:5173"];
-
 export default function initSocket(server) {
   const io = new Server(server, {
     cors: {
@@ -21,46 +17,26 @@ export default function initSocket(server) {
     transports: ["websocket", "polling"]
   });
 
-  // Configure horizontal scaling via Redis adapter
+  // Configure Redis adapter & cross-process relay with minimal connection footprint
   try {
     const pubClient = createRedisConnection("socketio-pub");
     const subClient = pubClient.duplicate();
-    subClient.on("error", (err) => {
-      if (
-        err.code === "ECONNRESET" ||
-        err.code === "EPIPE" ||
-        err.message?.includes("ECONNRESET") ||
-        err.message?.includes("EPIPE")
-      ) {
-        return;
-      }
-      console.warn("[Redis socketio-sub] Notice:", err.message);
-    });
 
     io.adapter(createAdapter(pubClient, subClient));
     console.log("[Socket.io] Horizontal scaling enabled with Redis adapter");
-  } catch (adapterErr) {
-    console.warn("[Socket.io] Could not initialize Redis adapter, using default in-memory adapter:", adapterErr.message);
-  }
 
-  // Cross-Process Worker Completion Relay
-  // Execution worker (running independently on EC2 or Render) publishes to CROSS_PROCESS_CHANNEL.
-  // The API Socket.IO instance listens and broadcasts execution-result to the appropriate room.
-  try {
-    const subResultsClient = createRedisConnection("socketio-exec-results");
-    subResultsClient.subscribe(CROSS_PROCESS_CHANNEL, (err) => {
-      if (err) {
-        console.warn("[Socket.io] Could not subscribe to worker execution results:", err.message);
-      } else {
-        console.log(`[Socket.io] Subscribed to '${CROSS_PROCESS_CHANNEL}' for cross-process worker execution results`);
+    // Reuse subClient to listen for worker completion events (avoids extra Redis connections)
+    subClient.subscribe(CROSS_PROCESS_CHANNEL, (err) => {
+      if (!err) {
+        console.log(`[Socket.io] Subscribed to '${CROSS_PROCESS_CHANNEL}' for worker results`);
       }
     });
 
-    subResultsClient.on("message", (channel, message) => {
+    subClient.on("message", (channel, message) => {
       if (channel === CROSS_PROCESS_CHANNEL) {
         try {
           const payload = JSON.parse(message);
-          const { roomID, submissionId, verdict, status, results, error, userId, type } = payload;
+          const { roomID, submissionId } = payload;
           if (roomID) {
             io.to(roomID).emit("execution-result", payload);
           }
@@ -70,8 +46,8 @@ export default function initSocket(server) {
         }
       }
     });
-  } catch (subErr) {
-    console.warn("[Socket.io] Could not initialize worker results subscriber:", subErr.message);
+  } catch (adapterErr) {
+    console.warn("[Socket.io] Running with default in-memory adapter:", adapterErr.message);
   }
 
   io.use((socket, next) => {
