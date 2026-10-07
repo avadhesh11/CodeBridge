@@ -85,7 +85,12 @@ updateProfile = async (req, res, next) => {
 githubRedirect = async (req, res, next) => {
   try {
     const clientId = process.env.GITHUB_CLIENT_ID;
-    const redirectUri = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/auth/github/callback`;
+    if (!clientId) {
+      const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173").trim().replace(/\/+$/, "");
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent("GitHub OAuth is not configured on the server")}`);
+    }
+    const backendUrl = (process.env.BACKEND_URL || "http://localhost:5000").trim().replace(/\/+$/, "");
+    const redirectUri = `${backendUrl}/api/auth/github/callback`;
     const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email`;
     return res.redirect(githubUrl);
   } catch (error) {
@@ -94,10 +99,11 @@ githubRedirect = async (req, res, next) => {
 };
 
 githubCallback = async (req, res, next) => {
+  const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173").trim().replace(/\/+$/, "");
   try {
     const { code } = req.query;
     if (!code) {
-      return res.status(400).json({ message: "Authorization code not provided" });
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent("Authorization code not provided by GitHub")}`);
     }
 
     const clientId = process.env.GITHUB_CLIENT_ID;
@@ -121,7 +127,8 @@ githubCallback = async (req, res, next) => {
     const accessToken = tokenData.access_token;
 
     if (!accessToken) {
-      return res.status(400).json({ message: "Failed to obtain access token from GitHub" });
+      const errDescription = tokenData.error_description || "Failed to obtain access token from GitHub";
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(errDescription)}`);
     }
 
     // Fetch user profile
@@ -142,11 +149,11 @@ githubCallback = async (req, res, next) => {
 
     let primaryEmailObj = Array.isArray(emails) ? emails.find(e => e.primary && e.verified) : null;
     if (!primaryEmailObj && Array.isArray(emails)) {
-      primaryEmailObj = emails[0];
+      primaryEmailObj = emails.find(e => e.primary) || emails[0];
     }
 
     if (!primaryEmailObj || !primaryEmailObj.email) {
-      return res.status(400).json({ message: "No verified primary email found for GitHub user" });
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent("No verified email found for GitHub user")}`);
     }
 
     const email = primaryEmailObj.email;
@@ -158,13 +165,11 @@ githubCallback = async (req, res, next) => {
     res.cookie("accessToken", authenticated.accessToken, cookieOpts(30));
     res.cookie("refreshToken", authenticated.refreshToken, cookieOpts(7));
 
-
-    // Redirect to frontend
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    return res.redirect(frontendUrl);
+    // Redirect to frontend with token param
+    return res.redirect(`${frontendUrl}?token=${authenticated.accessToken}`);
 
   } catch (error) {
-    next(error);
+    return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error.message || "GitHub authentication failed")}`);
   }
 };
 

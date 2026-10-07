@@ -3,6 +3,7 @@ import cors from "cors";
 import errorHandler  from "./middleware/errorHandler.js";
 import mongoose from "mongoose";
 import quesmodel from "./models/question.js";
+import userModel from "./models/user.js";
 import cookieParser from "cookie-parser";
 import authRoutes from "../src/modules/auth/routes.js";
 import authMiddleware from "./middleware/authmiddleware.js";
@@ -144,11 +145,19 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-app.get("/api/me", authMiddleware, (req, res) => {
-  res.json({
-    success: true,
-    user: req.user,
-  });
+app.get("/api/me", authMiddleware, async (req, res, next) => {
+  try {
+    const user = await userModel.findById(req.user._id).select("-password -currentRefreshToken");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    res.json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.use("/api/auth",authRoutes);

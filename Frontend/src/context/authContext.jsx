@@ -9,6 +9,16 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const tokenFromUrl = params.get("token");
+        if (tokenFromUrl) {
+          localStorage.setItem("token", tokenFromUrl);
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete("token");
+          window.history.replaceState({}, document.title, cleanUrl.pathname + (cleanUrl.search ? cleanUrl.search : ""));
+        }
+      }
       const res = await api("get", "me");
       setUser(res.data.user);
     } catch(error) {

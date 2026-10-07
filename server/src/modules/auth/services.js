@@ -25,70 +25,102 @@ export function generateRefreshToken(user) {
 }
 
 
-class authServices{
-signup=async(name,email,password)=>{
-const user=await userModel.findOne({email});
-if(user){
-    throw new apiError(400,"user already exist");
-}
-const hashedPassword = await bcrypt.hash(password, 10);
-const newUser=await userModel.create({
-    name,
-    email,
-    password:hashedPassword
-});
+class authServices {
+  signup = async (name, email, password) => {
+    const cleanName = (name || "").trim();
+    const cleanEmail = (email || "").trim().toLowerCase();
 
-const accessToken = generateAccessToken(newUser);
-const refreshToken = generateRefreshToken(newUser);
- newUser.currentRefreshToken=refreshToken;
- await newUser.save();
- return {
-     user: {
+    if (!cleanName || !cleanEmail || !password) {
+      throw new apiError(400, "All fields are required");
+    }
+
+    if (password.length < 6) {
+      throw new apiError(400, "Password must be at least 6 characters long");
+    }
+
+    const existingUser = await userModel.findOne({ email: cleanEmail });
+    if (existingUser) {
+      throw new apiError(400, "User already exists with this email");
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = await userModel.create({
+      name: cleanName,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: "interviewer"
+    });
+
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
+    newUser.currentRefreshToken = refreshToken;
+    await newUser.save();
+
+    return {
+      user: {
+        _id: newUser._id,
         id: newUser._id,
         name: newUser.name,
         email: newUser.email,
-      },
-      accessToken,
-      refreshToken,
-};
-}
-
-login=async(email,password)=>{
-const user=await userModel.findOne({email});
-if(!user){
-    throw new apiError(400,"user doesn't exist");
-}
-const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      throw new apiError(401,"Invalid credentials") ;
-
-const accessToken = generateAccessToken(user);
-const refreshToken = generateRefreshToken(user);
- user.currentRefreshToken=refreshToken;
- await user.save();
- return {
-     user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
+        role: newUser.role || "interviewer",
+        avatar: newUser.avatar || ""
       },
       accessToken,
       refreshToken,
     };
-  }
+  };
+
+  login = async (email, password) => {
+    const cleanEmail = (email || "").trim().toLowerCase();
+    const user = await userModel.findOne({ email: cleanEmail });
+    if (!user) {
+      throw new apiError(400, "User does not exist");
+    }
+
+    if (!user.password) {
+      throw new apiError(
+        400,
+        "This account was registered via GitHub. Please sign in with GitHub."
+      );
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      throw new apiError(401, "Invalid credentials");
+    }
+
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+    user.currentRefreshToken = refreshToken;
+    await user.save();
+
+    return {
+      user: {
+        _id: user._id,
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role || "interviewer",
+        avatar: user.avatar || ""
+      },
+      accessToken,
+      refreshToken,
+    };
+  };
 
   githubAuth = async (githubUser, email) => {
+    const cleanEmail = (email || "").trim().toLowerCase();
     let user = await userModel.findOne({
       $or: [
         { githubId: githubUser.id.toString() },
-        { email }
+        { email: cleanEmail }
       ]
     });
 
     if (!user) {
       user = await userModel.create({
-        name: githubUser.name || githubUser.login,
-        email,
+        name: (githubUser.name || githubUser.login || "GitHub User").trim(),
+        email: cleanEmail,
         githubId: githubUser.id.toString(),
         avatar: githubUser.avatar_url || "",
         role: "interviewer"
@@ -115,9 +147,12 @@ const refreshToken = generateRefreshToken(user);
 
     return {
       user: {
+        _id: user._id,
         id: user._id,
         name: user.name,
         email: user.email,
+        role: user.role || "interviewer",
+        avatar: user.avatar || ""
       },
       accessToken,
       refreshToken,

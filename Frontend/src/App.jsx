@@ -16,7 +16,8 @@ function App() {
     <AuthProvider>
       <Routes>
         <Route path="/"        element={<HomePage />} />
-        <Route path="/login"   element={<AuthPage />} />
+        <Route path="/login"   element={<AuthPage initialMode="login" />} />
+        <Route path="/signup"  element={<AuthPage initialMode="signup" />} />
         <Route path="/dashboard" element={<DashboardPage />} />
 
         <Route path="/code/:roomID" element={
