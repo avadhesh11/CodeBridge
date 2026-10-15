@@ -22,8 +22,6 @@ Live technical interviews require real-time collaboration alongside secure, reso
 - **Execution Worker Service**: A dedicated background worker consuming jobs from a Redis-backed queue ([BullMQ](https://bullmq.io/)) and evaluating submissions in ephemeral, isolated Docker containers.
 - **Frontend Workspace**: A React 19 single-page application providing a synchronized Monaco code editor, direct peer-to-peer WebRTC video, chat, and observable proctoring signal tracking.
 
-> [!TIP]
-> Preparing for technical interviews or reviewing system internals? See the comprehensive **[CodeBridge Technical Reference & Interview Preparation Guide](CodeBridge.md)** for complete architectural deep dives, detailed API references, database schemas, and codebase-specific interview question banks.
 
 ---
 
